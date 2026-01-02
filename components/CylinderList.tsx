@@ -1,9 +1,10 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Cylinder, CylinderStatus, GasType, CylinderSize, Transaction } from '../types';
+import { supabase } from '../lib/supabase';
 
 interface CylinderListProps {
-  cylinders: Cylinder[];
+  cylinders: Cylinder[]; // Kept for interface compatibility, but we use server fetch for the list
   transactions: Transaction[];
   onAdd: (cylinder: Cylinder) => void;
   onBulkAdd: (cylinders: Cylinder[]) => void;
@@ -11,10 +12,19 @@ interface CylinderListProps {
   onDelete: (id: string) => void;
 }
 
-const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, onAdd, onBulkAdd, onUpdate, onDelete }) => {
+const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders, transactions, onAdd, onBulkAdd, onUpdate, onDelete }) => {
+  // -- Server Side Data State --
+  const [serverCylinders, setServerCylinders] = useState<Cylinder[]>([]);
+  const [totalItems, setTotalItems] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // -- Filter & Pagination State --
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('All');
-  
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(100); 
+
   // -- CRUD Modal State --
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -28,19 +38,67 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, on
   // -- Import CSV Modal State --
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importedData, setImportedData] = useState<Partial<Cylinder>[]>([]);
-  const [importErrors, setImportErrors] = useState<Record<number, string>>({}); // rowIndex -> errorMessage
+  const [importErrors, setImportErrors] = useState<Record<number, string>>({}); 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // -- Delete Confirmation State --
   const [cylinderToDelete, setCylinderToDelete] = useState<Cylinder | null>(null);
 
-  const filteredCylinders = cylinders.filter(c => {
-    const matchesSearch = c.serialCode.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          c.gasType.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = filterStatus === 'All' || c.status === filterStatus;
-    return matchesSearch && matchesStatus;
-  });
+  // -- 1. Debounce Search Term --
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+      setCurrentPage(1); // Reset to page 1 on new search
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchTerm]);
 
+  // -- 2. Server-Side Fetching --
+  const fetchCylinders = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      let query = supabase
+        .from('cylinders')
+        .select('*', { count: 'exact' });
+
+      // Apply Status Filter
+      if (filterStatus !== 'All') {
+        query = query.eq('status', filterStatus);
+      }
+
+      // Apply Search Filter (Server-side ILIKE)
+      if (debouncedSearch) {
+        // Search by serialCode OR gasType
+        query = query.or(`serialCode.ilike.%${debouncedSearch}%,gasType.ilike.%${debouncedSearch}%`);
+      }
+
+      // Apply Pagination
+      const from = (currentPage - 1) * itemsPerPage;
+      const to = from + itemsPerPage - 1;
+      
+      const { data, count, error } = await query
+        .range(from, to)
+        .order('serialCode', { ascending: true });
+
+      if (error) throw error;
+
+      if (data) setServerCylinders(data);
+      if (count !== null) setTotalItems(count);
+
+    } catch (err) {
+      console.error("Error fetching cylinders:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currentPage, itemsPerPage, filterStatus, debouncedSearch]);
+
+  // Trigger fetch when dependencies change
+  useEffect(() => {
+    fetchCylinders();
+  }, [fetchCylinders]);
+
+
+  // -- Helpers --
   const getStatusColor = (status: CylinderStatus) => {
     switch (status) {
       case CylinderStatus.Available: return 'bg-green-100 text-green-800';
@@ -53,7 +111,9 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, on
   };
 
   const getRentalDuration = (cylId: string) => {
-    // Find the latest RENTAL_OUT transaction for this cylinder
+    // Note: This relies on `transactions` prop which is still fetched entirely in App.tsx. 
+    // For a production app with huge transaction history, this should also be a separate fetch or joined query.
+    // For now, it works fine as transactions are cached in App.
     const lastRentTx = transactions
         .filter(t => t.cylinderId === cylId && t.type === 'RENTAL_OUT')
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
@@ -69,7 +129,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, on
     return { text, isLongTerm };
   };
 
-  // Handlers
+  // -- CRUD Handlers --
   const handleOpenAdd = () => {
     setIsEditing(false);
     setCurrentCyl({
@@ -88,11 +148,12 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, on
     setIsModalOpen(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentCyl.serialCode) return;
 
     if (isEditing && currentCyl.id) {
+        // Update global state via prop (to keep dashboard sync)
         onUpdate(currentCyl as Cylinder);
     } else {
         const newCyl: Cylinder = {
@@ -104,8 +165,12 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, on
             lastLocation: currentCyl.lastLocation || 'Gudang Utama',
             currentHolder: currentCyl.currentHolder
         };
+        // Update global state
         onAdd(newCyl);
     }
+    
+    // Refresh local list to show changes immediately
+    setTimeout(fetchCylinders, 500); // Small delay to ensure DB write completes
     setIsModalOpen(false);
   };
 
@@ -113,11 +178,12 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, on
       if (cylinderToDelete) {
           onDelete(cylinderToDelete.id);
           setCylinderToDelete(null);
+          // Refresh list
+          setTimeout(fetchCylinders, 500);
       }
   };
 
   // --- CSV Import Logic ---
-
   const downloadTemplate = () => {
     const headers = ['serialCode', 'gasType', 'size', 'status', 'lastLocation'];
     const example1 = ['OXY-NEW-001', 'Oxygen', '6m3', 'Available', 'Gudang Utama'];
@@ -148,8 +214,6 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, on
         parseCSV(text);
     };
     reader.readAsText(file);
-    
-    // Reset input so same file can be selected again if needed
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -160,8 +224,6 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, on
           return;
       }
 
-      // Headers should be: serialCode, gasType, size, status, lastLocation
-      // We assume order or check indices, but simple approach is standard index
       const dataRows = lines.slice(1);
       const parsed: Partial<Cylinder>[] = [];
       const errors: Record<number, string> = {};
@@ -172,26 +234,16 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, on
 
       dataRows.forEach((row, index) => {
           const cols = row.split(',').map(c => c.trim());
-          if (cols.length < 3) return; // Skip malformed rows
+          if (cols.length < 3) return; 
 
           const [serialCode, gasTypeStr, sizeStr, statusStr, location] = cols;
-
-          // Validate
           let error = '';
           
-          // Check Duplicates in existing DB
-          if (cylinders.some(c => c.serialCode === serialCode)) {
-             error = 'Duplicate Serial Code (Exists in DB)';
-          }
-          // Check Duplicates in current import batch
-          else if (parsed.some(p => p.serialCode === serialCode)) {
-              error = 'Duplicate Serial Code (Double entry in file)';
-          }
-          else if (!validGasTypes.includes(gasTypeStr as GasType)) {
-              error = `Invalid Gas Type. Valid: ${validGasTypes.join(', ')}`;
+          if (!validGasTypes.includes(gasTypeStr as GasType)) {
+              error = `Invalid Gas Type`;
           }
           else if (!validSizes.includes(sizeStr as CylinderSize)) {
-              error = `Invalid Size. Valid: ${validSizes.join(', ')}`;
+              error = `Invalid Size`;
           }
 
           if (error) {
@@ -226,17 +278,23 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, on
       }));
 
       onBulkAdd(newCylinders);
+      setTimeout(fetchCylinders, 1000); // Allow time for bulk insert
       
       setIsImportModalOpen(false);
       setImportedData([]);
       setImportErrors({});
   };
 
+  // -- Render Pagination Calculation --
+  const totalPages = Math.ceil(totalItems / itemsPerPage);
+  const startItem = (currentPage - 1) * itemsPerPage + 1;
+  const endItem = Math.min(startItem + itemsPerPage - 1, totalItems);
+
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-4 animate-fade-in pb-20 md:pb-0">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <h2 className="text-2xl font-bold text-gray-800">Inventory</h2>
-        <div className="flex gap-2 w-full md:w-auto">
+        <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
           <div className="relative flex-1 md:w-64">
             <span className="material-icons absolute left-3 top-2.5 text-gray-400 text-sm">search</span>
             <input 
@@ -250,13 +308,12 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, on
           <select 
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
             value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
+            onChange={(e) => { setFilterStatus(e.target.value); setCurrentPage(1); }}
           >
             <option value="All">All Status</option>
             {Object.values(CylinderStatus).map(s => <option key={s} value={s}>{s}</option>)}
           </select>
           
-          {/* Action Buttons */}
           <div className="flex gap-2">
             <button 
                 onClick={() => setIsImportModalOpen(true)}
@@ -276,65 +333,117 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, on
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-gray-600">
-            <thead className="bg-gray-50 text-gray-700 uppercase font-medium">
-              <tr>
-                <th className="px-6 py-3">Code</th>
-                <th className="px-6 py-3">Gas Type</th>
-                <th className="px-6 py-3">Size</th>
-                <th className="px-6 py-3">Status</th>
-                <th className="px-6 py-3">Location</th>
-                <th className="px-6 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filteredCylinders.length > 0 ? (
-                filteredCylinders.map((cyl) => {
-                  const duration = cyl.status === CylinderStatus.Rented ? getRentalDuration(cyl.id) : null;
-
-                  return (
-                    <tr key={cyl.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4 font-medium text-gray-900 font-mono">{cyl.serialCode}</td>
-                      <td className="px-6 py-4">{cyl.gasType}</td>
-                      <td className="px-6 py-4">{cyl.size}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex flex-col items-start gap-1">
-                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(cyl.status)}`}>
-                            {cyl.status}
-                          </span>
-                          {duration && (
-                            <span className={`text-[10px] font-medium flex items-center gap-1 ${duration.isLongTerm ? 'text-red-600' : 'text-gray-500'}`}>
-                              <span className="material-icons text-[10px]">history</span>
-                              {duration.text}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-gray-500">{cyl.lastLocation}</td>
-                      <td className="px-6 py-4 text-right">
-                          <div className="flex justify-end gap-2">
-                              <button onClick={() => handleOpenEdit(cyl)} className="text-gray-400 hover:text-indigo-600">
-                                  <span className="material-icons text-sm">edit</span>
-                              </button>
-                              <button onClick={() => setCylinderToDelete(cyl)} className="text-gray-400 hover:text-red-500">
-                                  <span className="material-icons text-sm">delete</span>
-                              </button>
-                          </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col min-h-[500px]">
+        {isLoading ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
+                <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-3"></div>
+                <p className="text-sm">Loading inventory...</p>
+            </div>
+        ) : (
+            <div className="overflow-x-auto flex-1">
+            <table className="w-full text-left text-sm text-gray-600">
+                <thead className="bg-gray-50 text-gray-700 uppercase font-medium">
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-gray-400">
-                    No cylinders found matching your search.
-                  </td>
+                    <th className="px-6 py-3">Code</th>
+                    <th className="px-6 py-3">Gas Type</th>
+                    <th className="px-6 py-3">Size</th>
+                    <th className="px-6 py-3">Status</th>
+                    <th className="px-6 py-3">Location</th>
+                    <th className="px-6 py-3 text-right">Actions</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                {serverCylinders.length > 0 ? (
+                    serverCylinders.map((cyl) => {
+                    const duration = cyl.status === CylinderStatus.Rented ? getRentalDuration(cyl.id) : null;
+
+                    return (
+                        <tr key={cyl.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-4 font-medium text-gray-900 font-mono">{cyl.serialCode}</td>
+                        <td className="px-6 py-4">{cyl.gasType}</td>
+                        <td className="px-6 py-4">{cyl.size}</td>
+                        <td className="px-6 py-4">
+                            <div className="flex flex-col items-start gap-1">
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(cyl.status)}`}>
+                                {cyl.status}
+                            </span>
+                            {duration && (
+                                <span className={`text-[10px] font-medium flex items-center gap-1 ${duration.isLongTerm ? 'text-red-600' : 'text-gray-500'}`}>
+                                <span className="material-icons text-[10px]">history</span>
+                                {duration.text}
+                                </span>
+                            )}
+                            </div>
+                        </td>
+                        <td className="px-6 py-4 text-gray-500">{cyl.lastLocation}</td>
+                        <td className="px-6 py-4 text-right">
+                            <div className="flex justify-end gap-2">
+                                <button onClick={() => handleOpenEdit(cyl)} className="text-gray-400 hover:text-indigo-600">
+                                    <span className="material-icons text-sm">edit</span>
+                                </button>
+                                <button onClick={() => setCylinderToDelete(cyl)} className="text-gray-400 hover:text-red-500">
+                                    <span className="material-icons text-sm">delete</span>
+                                </button>
+                            </div>
+                        </td>
+                        </tr>
+                    );
+                    })
+                ) : (
+                    <tr>
+                    <td colSpan={6} className="px-6 py-20 text-center text-gray-400">
+                        <span className="material-icons text-4xl mb-2 text-gray-300">search_off</span>
+                        <p>No cylinders found matching your criteria.</p>
+                    </td>
+                    </tr>
+                )}
+                </tbody>
+            </table>
+            </div>
+        )}
+        
+        {/* Pagination Footer */}
+        <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+                <span className="hidden md:inline">Show</span>
+                <select 
+                    value={itemsPerPage}
+                    onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
+                    className="border border-gray-300 rounded px-2 py-1 bg-white focus:ring-2 focus:ring-indigo-500 outline-none text-xs md:text-sm"
+                >
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={250}>250</option>
+                    <option value={500}>500</option>
+                </select>
+                <span className="hidden md:inline">items</span>
+                <span className="text-gray-400 mx-2 hidden md:inline">|</span>
+                <span>
+                    {totalItems > 0 ? `${startItem}-${endItem}` : '0'} of {totalItems} records
+                </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+                <button
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1 || isLoading}
+                    className="p-1.5 md:p-2 border border-gray-300 rounded-lg hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 transition-colors bg-white shadow-sm"
+                >
+                    <span className="material-icons text-sm">chevron_left</span>
+                </button>
+                
+                <span className="text-sm font-medium text-gray-700 bg-white px-3 py-1.5 md:py-2 border border-gray-300 rounded-lg shadow-sm">
+                    Page {currentPage} of {totalPages || 1}
+                </span>
+
+                <button
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages || isLoading || totalPages === 0}
+                    className="p-1.5 md:p-2 border border-gray-300 rounded-lg hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 transition-colors bg-white shadow-sm"
+                >
+                    <span className="material-icons text-sm">chevron_right</span>
+                </button>
+            </div>
         </div>
       </div>
 
@@ -445,7 +554,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders, transactions, on
                                  <ul className="list-disc pl-5 space-y-1">
                                      <li>File must be a <strong>.csv</strong> format.</li>
                                      <li>Columns order: <strong>serialCode, gasType, size, status, lastLocation</strong>.</li>
-                                     <li>Valid Gas Types: {Object.values(GasType).join(', ')}.</li>
+                                     <li>Supported Gases: All major industrial/medical gases (e.g. Oxygen, Helium, LPG, etc).</li>
                                      <li>Valid Sizes: {Object.values(CylinderSize).join(', ')}.</li>
                                  </ul>
                              </div>

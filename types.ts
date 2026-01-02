@@ -5,6 +5,20 @@ export enum GasType {
   Argon = 'Argon',
   CO2 = 'CO2',
   Nitrogen = 'Nitrogen',
+  Helium = 'Helium',
+  Hydrogen = 'Hydrogen',
+  LPG = 'LPG',
+  Propane = 'Propane',
+  Methane = 'Methane',
+  Butane = 'Butane',
+  MedicalOxygen = 'Medical Oxygen',
+  MedicalAir = 'Medical Air',
+  NitrousOxide = 'Nitrous Oxide',
+  SulfurHexafluoride = 'Sulfur Hexafluoride (SF6)',
+  Ammonia = 'Ammonia',
+  Chlorine = 'Chlorine',
+  Mix = 'Mix Gas',
+  Other = 'Other'
 }
 
 export enum CylinderStatus {
@@ -79,6 +93,13 @@ export interface MemberPrice {
   gasType: GasType;
   size: CylinderSize;
   price: number; // Custom rate for this specific combination
+}
+
+export interface GasPrice {
+  id: string;
+  gasType: GasType;
+  size: CylinderSize;
+  price: number; // Base rate for this specific combination
 }
 
 export interface RefillPrice {

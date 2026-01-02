@@ -10,7 +10,7 @@ import RefillView from './components/RefillView';
 import ReportsView from './components/ReportsView';
 import Login from './components/Login';
 import AdminView from './components/AdminView';
-import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus } from './types';
+import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice } from './types';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 
 const App: React.FC = () => {
@@ -50,6 +50,7 @@ const App: React.FC = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [memberPrices, setMemberPrices] = useState<MemberPrice[]>([]);
+  const [gasPrices, setGasPrices] = useState<GasPrice[]>([]);
   const [refillStations, setRefillStations] = useState<RefillStation[]>([]);
   const [refillPrices, setRefillPrices] = useState<RefillPrice[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]); // For Admin View
@@ -57,22 +58,26 @@ const App: React.FC = () => {
   // -- 1. FETCH INITIAL DATA --
   const fetchData = async () => {
     try {
-      const { data: cylData } = await supabase.from('cylinders').select('*');
+      // Supabase default limit is 1000 rows. We increase range to fetch full datasets.
+      const { data: cylData } = await supabase.from('cylinders').select('*').range(0, 9999);
       if (cylData) setCylinders(cylData);
 
-      const { data: memData } = await supabase.from('members').select('*');
+      const { data: memData } = await supabase.from('members').select('*').range(0, 9999);
       if (memData) setMembers(memData);
 
-      const { data: txData } = await supabase.from('transactions').select('*');
+      const { data: txData } = await supabase.from('transactions').select('*').range(0, 9999);
       if (txData) setTransactions(txData);
 
-      const { data: mpData } = await supabase.from('member_prices').select('*');
+      const { data: mpData } = await supabase.from('member_prices').select('*').range(0, 9999);
       if (mpData) setMemberPrices(mpData);
 
-      const { data: rsData } = await supabase.from('refill_stations').select('*');
+      const { data: gpData } = await supabase.from('gas_prices').select('*').range(0, 9999);
+      if (gpData) setGasPrices(gpData);
+
+      const { data: rsData } = await supabase.from('refill_stations').select('*').range(0, 9999);
       if (rsData) setRefillStations(rsData);
 
-      const { data: rpData } = await supabase.from('refill_prices').select('*');
+      const { data: rpData } = await supabase.from('refill_prices').select('*').range(0, 9999);
       if (rpData) setRefillPrices(rpData);
 
     } catch (error) {
@@ -494,6 +499,7 @@ const App: React.FC = () => {
               cylinders={cylinders} 
               members={members} 
               prices={memberPrices} 
+              gasPrices={gasPrices}
               transactions={transactions}
               onCompleteRental={handleRental} 
             />

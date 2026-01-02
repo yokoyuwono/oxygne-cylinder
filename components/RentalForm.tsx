@@ -1,18 +1,20 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Cylinder, CylinderStatus, Member, MemberPrice, Transaction } from '../types';
-import { DEFAULT_PRICES } from '../constants';
+import { Cylinder, CylinderStatus, Member, MemberPrice, Transaction, GasPrice } from '../types';
+import { supabase } from '../lib/supabase';
 
 interface RentalFormProps {
   cylinders: Cylinder[];
   members: Member[];
   prices: MemberPrice[];
+  gasPrices: GasPrice[];
   transactions: Transaction[];
   onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean) => void;
 }
 
-const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, transactions, onCompleteRental }) => {
+const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gasPrices, transactions, onCompleteRental }) => {
   const [selectedMemberId, setSelectedMemberId] = useState<string>('');
+  const [selectedMemberObj, setSelectedMemberObj] = useState<Member | null>(null); // Store selected member object directly
   const [cart, setCart] = useState<Cylinder[]>([]);
   const [returnsList, setReturnsList] = useState<string[]>([]); // IDs of cylinders being returned
   const [error, setError] = useState<string | null>(null);
@@ -27,12 +29,16 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
   // -- Member Search State --
   const [memberQuery, setMemberQuery] = useState('');
   const [debouncedMemberQuery, setDebouncedMemberQuery] = useState('');
+  const [memberSearchResults, setMemberSearchResults] = useState<Member[]>([]);
+  const [isMemberSearching, setIsMemberSearching] = useState(false);
   const [showMemberMenu, setShowMemberMenu] = useState(false);
   const [highlightedMemberIdx, setHighlightedMemberIdx] = useState(0);
   const memberInputRef = useRef<HTMLInputElement>(null);
 
   // -- Cylinder Search State --
   const [scanInput, setScanInput] = useState('');
+  const [serverSuggestions, setServerSuggestions] = useState<Cylinder[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const [showCylinderMenu, setShowCylinderMenu] = useState(false);
   const [highlightedCylinderIdx, setHighlightedCylinderIdx] = useState(0);
   const cylinderInputRef = useRef<HTMLInputElement>(null);
@@ -53,25 +59,74 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
     return () => clearTimeout(handler);
   }, [memberQuery]);
 
+  // -- Server-Side Member Search Effect --
+  useEffect(() => {
+    // If menu is closed and query is empty, we might not need to fetch, 
+    // but fetching initials is good for UX when focusing.
+    if (!showMemberMenu && !debouncedMemberQuery) return;
+
+    const fetchMembers = async () => {
+        setIsMemberSearching(true);
+        try {
+            let query = supabase.from('members').select('*').limit(10);
+            
+            if (debouncedMemberQuery) {
+                // ILIKE for case insensitive search on multiple fields
+                query = query.or(`companyName.ilike.%${debouncedMemberQuery}%,name.ilike.%${debouncedMemberQuery}%,address.ilike.%${debouncedMemberQuery}%`);
+            } else {
+                // Default view (e.g. recently active or alphabetical)
+                query = query.order('companyName', { ascending: true });
+            }
+
+            const { data } = await query;
+            if (data) {
+                setMemberSearchResults(data);
+            }
+        } catch (err) {
+            console.error("Error searching members:", err);
+        } finally {
+            setIsMemberSearching(false);
+        }
+    };
+
+    fetchMembers();
+  }, [debouncedMemberQuery, showMemberMenu]);
+
+  // -- Server-Side Cylinder Search Effect --
+  useEffect(() => {
+    const query = scanInput.trim();
+    if (!query) {
+        setServerSuggestions([]);
+        return;
+    }
+
+    const handler = setTimeout(async () => {
+        setIsSearching(true);
+        try {
+            const { data } = await supabase
+                .from('cylinders')
+                .select('*')
+                .eq('status', CylinderStatus.Available)
+                .or(`serialCode.ilike.%${query}%,gasType.ilike.%${query}%`)
+                .limit(10); // Limit results for performance
+
+            if (data) {
+                // Filter out items already in cart locally
+                const available = data.filter(c => !cart.some(item => item.id === c.id));
+                setServerSuggestions(available);
+            }
+        } catch (err) {
+            console.error("Error searching cylinders:", err);
+        } finally {
+            setIsSearching(false);
+        }
+    }, 300);
+
+    return () => clearTimeout(handler);
+  }, [scanInput, cart]);
+
   // Derived Data
-  const selectedMember = members.find(m => m.id === selectedMemberId);
-
-  // Filter Members
-  const filteredMembers = members.filter(m => 
-    m.companyName.toLowerCase().includes(debouncedMemberQuery.toLowerCase()) || 
-    m.name.toLowerCase().includes(debouncedMemberQuery.toLowerCase()) ||
-    m.address.toLowerCase().includes(debouncedMemberQuery.toLowerCase())
-  );
-
-  // Filter Available Cylinders
-  const availableCylinders = cylinders.filter(c => 
-    c.status === CylinderStatus.Available && !cart.some(item => item.id === c.id)
-  );
-  
-  const filteredCylinders = scanInput ? availableCylinders.filter(c => 
-    c.serialCode.toLowerCase().includes(scanInput.toLowerCase()) ||
-    c.gasType.toLowerCase().includes(scanInput.toLowerCase())
-  ).slice(0, 5) : [];
+  const selectedMember = selectedMemberObj || members.find(m => m.id === selectedMemberId);
 
   const memberHeldCylinders = selectedMemberId 
     ? cylinders.filter(c => c.currentHolder === selectedMemberId)
@@ -80,12 +135,22 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
   // --- Helpers ---
 
   const getPrice = (cylinder: Cylinder, memberId: string): { price: number; isCustom: boolean } => {
+    // 1. Check for custom member-specific pricing first
     const customPrice = prices.find(
       p => p.memberId === memberId && p.gasType === cylinder.gasType && p.size === cylinder.size
     );
     if (customPrice) return { price: customPrice.price, isCustom: true };
-    const defaultPrice = DEFAULT_PRICES[cylinder.gasType]?.[cylinder.size] || 0;
-    return { price: defaultPrice, isCustom: false };
+    
+    // 2. Fallback to base prices from database
+    const basePrice = gasPrices.find(
+      p => p.gasType === cylinder.gasType && p.size === cylinder.size
+    );
+    
+    if (basePrice) {
+        return { price: basePrice.price, isCustom: false };
+    }
+    
+    return { price: 0, isCustom: false };
   };
 
   const getHeldDuration = (cylinderId: string) => {
@@ -119,6 +184,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
 
   const handleMemberSelect = (member: Member) => {
     setSelectedMemberId(member.id);
+    setSelectedMemberObj(member);
     setMemberQuery(member.companyName);
     setDebouncedMemberQuery(member.companyName);
     setShowMemberMenu(false);
@@ -131,26 +197,26 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
   const handleMemberKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setHighlightedMemberIdx(prev => (prev < filteredMembers.length - 1 ? prev + 1 : prev));
+      setHighlightedMemberIdx(prev => (prev < memberSearchResults.length - 1 ? prev + 1 : prev));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHighlightedMemberIdx(prev => (prev > 0 ? prev - 1 : 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (showMemberMenu && filteredMembers.length > 0) {
-        handleMemberSelect(filteredMembers[highlightedMemberIdx]);
+      if (showMemberMenu && memberSearchResults.length > 0) {
+        handleMemberSelect(memberSearchResults[highlightedMemberIdx]);
       }
     } else if (e.key === 'Escape') {
       setShowMemberMenu(false);
     }
   };
 
-  const handleScanSubmit = (e?: React.FormEvent) => {
+  const handleScanSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setError(null);
 
-    if (showCylinderMenu && filteredCylinders.length > 0) {
-      addToCart(filteredCylinders[highlightedCylinderIdx]);
+    if (showCylinderMenu && serverSuggestions.length > 0) {
+      addToCart(serverSuggestions[highlightedCylinderIdx]);
       return;
     }
 
@@ -163,13 +229,29 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
       return;
     }
 
-    const cylinder = cylinders.find(c => c.serialCode === code);
-    if (!cylinder) {
-      setError(`Cylinder ${code} not found.`);
-    } else if (cylinder.status !== CylinderStatus.Available) {
-      setError(`Cylinder ${code} is ${cylinder.status}.`);
-    } else {
-      addToCart(cylinder);
+    // Verify exact code with server
+    setIsSearching(true);
+    try {
+        const { data, error } = await supabase
+            .from('cylinders')
+            .select('*')
+            .eq('serialCode', code)
+            .maybeSingle();
+
+        if (error && error.code !== 'PGRST116') throw error;
+
+        if (!data) {
+          setError(`Cylinder ${code} not found.`);
+        } else if (data.status !== CylinderStatus.Available) {
+          setError(`Cylinder ${code} is ${data.status}.`);
+        } else {
+          addToCart(data);
+        }
+    } catch (err) {
+        console.error(err);
+        setError("Error checking cylinder status.");
+    } finally {
+        setIsSearching(false);
     }
   };
 
@@ -177,7 +259,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       if (!showCylinderMenu) setShowCylinderMenu(true);
-      setHighlightedCylinderIdx(prev => (prev < filteredCylinders.length - 1 ? prev + 1 : prev));
+      setHighlightedCylinderIdx(prev => (prev < serverSuggestions.length - 1 ? prev + 1 : prev));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHighlightedCylinderIdx(prev => (prev > 0 ? prev - 1 : 0));
@@ -215,6 +297,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
     setCart([]);
     setReturnsList([]);
     setSelectedMemberId('');
+    setSelectedMemberObj(null);
     setMemberQuery('');
     setDebouncedMemberQuery('');
     setError(null);
@@ -266,12 +349,14 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
                   autoComplete="off"
                   autoFocus
                 />
-                <span className="material-icons absolute left-4 top-4 text-indigo-300 text-xl md:text-2xl mt-0.5">search</span>
+                <span className={`material-icons absolute left-4 top-4 text-indigo-300 text-xl md:text-2xl mt-0.5 ${isMemberSearching ? 'animate-spin' : ''}`}>
+                    {isMemberSearching ? 'sync' : 'search'}
+                </span>
 
                 {/* Dropdown */}
-                {showMemberMenu && filteredMembers.length > 0 && (
+                {showMemberMenu && memberSearchResults.length > 0 && (
                   <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-gray-100 rounded-xl shadow-2xl max-h-60 overflow-y-auto z-30">
-                    {filteredMembers.map((m, idx) => (
+                    {memberSearchResults.map((m, idx) => (
                       <div 
                         key={m.id}
                         onMouseDown={() => handleMemberSelect(m)}
@@ -293,6 +378,11 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
                     ))}
                   </div>
                 )}
+                {showMemberMenu && memberSearchResults.length === 0 && !isMemberSearching && debouncedMemberQuery && (
+                    <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-gray-100 rounded-xl shadow-lg p-4 text-center z-30">
+                        <p className="text-gray-500">No members found.</p>
+                    </div>
+                )}
             </div>
         </div>
       </div>
@@ -300,6 +390,8 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
   }
 
   // MODE 2: POS Transaction View
+  if (!selectedMember) return null; // Should not happen due to check above, but for types
+
   return (
     <div className="flex flex-col h-full animate-fade-in relative pb-20 md:pb-0">
         {feedback && (
@@ -313,12 +405,12 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
         <div className="flex justify-between items-center bg-white p-3 md:p-4 rounded-xl shadow-sm border border-gray-200 mb-4 shrink-0">
             <div className="flex items-center gap-3 md:gap-4 overflow-hidden">
                 <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-base md:text-lg shrink-0">
-                    {selectedMember?.companyName.charAt(0)}
+                    {selectedMember.companyName.charAt(0)}
                 </div>
                 <div className="min-w-0">
-                    <h2 className="text-base md:text-lg font-bold text-gray-800 truncate">{selectedMember?.companyName}</h2>
+                    <h2 className="text-base md:text-lg font-bold text-gray-800 truncate">{selectedMember.companyName}</h2>
                     <div className="flex gap-4 text-xs md:text-sm text-gray-500 truncate">
-                        <span className="flex items-center gap-1"><span className="material-icons text-[10px] md:text-xs">person</span> {selectedMember?.name}</span>
+                        <span className="flex items-center gap-1"><span className="material-icons text-[10px] md:text-xs">person</span> {selectedMember.name}</span>
                         {selectedMember.totalDebt > 0 && (
                             <span className="flex items-center gap-1 text-red-600 font-bold bg-red-50 px-2 rounded">
                                 <span className="material-icons text-[10px]">money_off</span> 
@@ -331,6 +423,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
             <button 
                 onClick={() => {
                     setSelectedMemberId('');
+                    setSelectedMemberObj(null);
                     setMemberQuery('');
                     setDebouncedMemberQuery('');
                     setCart([]);
@@ -363,25 +456,28 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
                                     onFocus={() => setShowCylinderMenu(true)}
                                     onBlur={() => setTimeout(() => setShowCylinderMenu(false), 200)}
                                     onKeyDown={handleCylinderKeyDown}
-                                    placeholder="SCAN CODE..."
+                                    placeholder={isSearching ? "SEARCHING..." : "SCAN CODE..."}
                                     className="w-full border-2 border-gray-200 rounded-xl pl-10 md:pl-12 pr-4 py-2 md:py-3 text-base md:text-lg font-mono focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all uppercase"
                                     autoComplete="off"
                                     autoFocus
                                 />
-                                <span className="material-icons absolute left-3 md:left-4 top-2.5 md:top-3.5 text-gray-400 text-lg md:text-xl">qr_code_scanner</span>
+                                <span className={`material-icons absolute left-3 md:left-4 top-2.5 md:top-3.5 text-gray-400 text-lg md:text-xl ${isSearching ? 'animate-spin' : ''}`}>
+                                    {isSearching ? 'sync' : 'qr_code_scanner'}
+                                </span>
                             </div>
                             <button 
                                 type="submit"
-                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 md:px-8 rounded-xl font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95 text-sm md:text-base"
+                                disabled={isSearching}
+                                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white px-4 md:px-8 rounded-xl font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95 text-sm md:text-base"
                             >
                                 ADD
                             </button>
                         </div>
 
                         {/* Suggestions */}
-                        {showCylinderMenu && filteredCylinders.length > 0 && (
+                        {showCylinderMenu && serverSuggestions.length > 0 && (
                             <div className="absolute left-0 w-full mt-2 bg-white border border-gray-200 rounded-xl shadow-2xl z-20 overflow-hidden">
-                                {filteredCylinders.map((cyl, idx) => (
+                                {serverSuggestions.map((cyl, idx) => (
                                     <div
                                         key={cyl.id}
                                         onMouseDown={() => addToCart(cyl)}
@@ -439,7 +535,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
                            </div>
                         ) : (
                            cart.map(item => {
-                              const { price, isCustom } = getPrice(item, selectedMemberId);
+                              const { price, isCustom } = getPrice(item, selectedMember.id);
                               return (
                                 <div key={item.id} className="bg-white p-3 rounded-xl border border-gray-100 flex justify-between items-center shadow-sm">
                                     <div className="flex items-center gap-3">
@@ -536,7 +632,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
                         ) : (
                             <div className="space-y-2">
                                 {cart.map(item => {
-                                    const { price, isCustom } = getPrice(item, selectedMemberId);
+                                    const { price, isCustom } = getPrice(item, selectedMember.id);
                                     return (
                                         <div key={item.id} className="flex justify-between items-start group">
                                             <div className="flex items-start gap-3">
@@ -651,7 +747,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, tra
                                 </h5>
                                 <ul className="space-y-1">
                                     {cart.map(item => {
-                                        const { price } = getPrice(item, selectedMemberId);
+                                        const { price } = getPrice(item, selectedMember.id);
                                         return (
                                             <li key={item.id} className="flex justify-between text-sm">
                                                 <span className="text-gray-600 font-mono">{item.serialCode}</span>

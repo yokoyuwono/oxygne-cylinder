@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Cylinder, Transaction, Member, RefillStation, GasType, CylinderStatus } from '../types';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, AreaChart, Area } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 
 interface ReportsViewProps {
   cylinders: Cylinder[];
@@ -15,6 +15,10 @@ const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
 const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, members, stations }) => {
   const [activeTab, setActiveTab] = useState<'inventory' | 'financials' | 'logs'>('inventory');
   const [logFilter, setLogFilter] = useState('');
+  
+  // -- New State for Logs --
+  const [viewMode, setViewMode] = useState<'table' | 'card'>('table');
+  const [selectedType, setSelectedType] = useState<string>('ALL');
 
   // -- Helpers --
   const formatIDR = (val: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(val);
@@ -44,12 +48,6 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
   const avgRefillCost = refillTransactions.length ? Math.round(totalRefillCost / refillTransactions.length) : 0;
 
   const costByStationData = stations.map(s => {
-      // Find all REFILL_OUT txs to this station, then find the corresponding REFILL_IN? 
-      // Simplified: We look for REFILL_IN transactions. 
-      // Note: In our current model, REFILL_IN doesn't explicitly store stationId, 
-      // but REFILL_OUT does. For accurate reporting, we'd link them. 
-      // For this mock, we'll estimate based on 'RefillStation' usage or REFILL_OUT count.
-      // *Correction*: Let's track 'REFILL_OUT' to see volume sent to station.
       const sentCount = transactions.filter(t => t.type === 'REFILL_OUT' && t.refillStationId === s.id).length;
       return {
           name: s.name,
@@ -65,9 +63,12 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           const station = stations.find(s => s.id === t.refillStationId);
           
           const searchStr = `${t.id} ${t.type} ${cyl?.serialCode} ${member?.companyName} ${station?.name}`.toLowerCase();
-          return searchStr.includes(logFilter.toLowerCase());
+          const matchesSearch = searchStr.includes(logFilter.toLowerCase());
+          const matchesType = selectedType === 'ALL' || t.type === selectedType;
+          
+          return matchesSearch && matchesType;
       }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [transactions, cylinders, members, stations, logFilter]);
+  }, [transactions, cylinders, members, stations, logFilter, selectedType]);
 
   const getTxDescription = (t: Transaction) => {
       const cyl = cylinders.find(c => c.id === t.cylinderId);
@@ -76,11 +77,25 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
       const code = cyl?.serialCode || 'Unknown';
 
       switch(t.type) {
-          case 'RENTAL_OUT': return { title: `Rented ${code}`, subtitle: `To ${member?.companyName}`, icon: 'shopping_cart', color: 'bg-blue-100 text-blue-600' };
-          case 'RETURN': return { title: `Returned ${code}`, subtitle: `From ${member?.companyName}`, icon: 'assignment_return', color: 'bg-green-100 text-green-600' };
-          case 'REFILL_OUT': return { title: `Sent to Refill ${code}`, subtitle: `To ${station?.name}`, icon: 'local_shipping', color: 'bg-orange-100 text-orange-600' };
-          case 'REFILL_IN': return { title: `Restocked ${code}`, subtitle: `Cost: ${t.cost ? formatIDR(t.cost) : '-'}`, icon: 'inventory_2', color: 'bg-indigo-100 text-indigo-600' };
-          default: return { title: 'Unknown', subtitle: '', icon: 'help', color: 'bg-gray-100' };
+          case 'RENTAL_OUT': return { title: `Rented ${code}`, subtitle: `To ${member?.companyName}`, icon: 'shopping_cart', color: 'bg-blue-100 text-blue-600', badge: 'RENTAL' };
+          case 'RETURN': return { title: `Returned ${code}`, subtitle: `From ${member?.companyName}`, icon: 'assignment_return', color: 'bg-green-100 text-green-600', badge: 'RETURN' };
+          case 'REFILL_OUT': return { title: `Sent to Refill ${code}`, subtitle: `To ${station?.name}`, icon: 'local_shipping', color: 'bg-orange-100 text-orange-600', badge: 'DISPATCH' };
+          case 'REFILL_IN': return { title: `Restocked ${code}`, subtitle: `Cost: ${t.cost ? formatIDR(t.cost) : '-'}`, icon: 'inventory_2', color: 'bg-indigo-100 text-indigo-600', badge: 'RESTOCK' };
+          case 'DEBT_PAYMENT': return { title: 'Debt Payment', subtitle: `From ${member?.companyName}`, icon: 'payments', color: 'bg-teal-100 text-teal-600', badge: 'PAYMENT' };
+          case 'DEPOSIT_REFUND': return { title: 'Deposit Refund', subtitle: `To ${member?.companyName}`, icon: 'savings', color: 'bg-purple-100 text-purple-600', badge: 'REFUND' };
+          default: return { title: 'Unknown', subtitle: '', icon: 'help', color: 'bg-gray-100', badge: 'OTHER' };
+      }
+  };
+
+  const getTypeBadgeClass = (type: string) => {
+      switch(type) {
+          case 'RENTAL_OUT': return 'bg-blue-100 text-blue-800';
+          case 'RETURN': return 'bg-green-100 text-green-800';
+          case 'REFILL_OUT': return 'bg-orange-100 text-orange-800';
+          case 'REFILL_IN': return 'bg-indigo-100 text-indigo-800';
+          case 'DEBT_PAYMENT': return 'bg-teal-100 text-teal-800';
+          case 'DEPOSIT_REFUND': return 'bg-purple-100 text-purple-800';
+          default: return 'bg-gray-100 text-gray-800';
       }
   };
 
@@ -277,8 +292,8 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
       {/* TAB: AUDIT LOG */}
       {activeTab === 'logs' && (
           <div className="space-y-4 animate-fade-in">
-              <div className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur rounded-xl border border-gray-200 p-3 shadow-sm">
-                  <div className="relative">
+              <div className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur rounded-xl border border-gray-200 p-3 shadow-sm flex flex-col md:flex-row gap-3">
+                  <div className="relative flex-1">
                         <span className="material-icons absolute left-3 top-2.5 text-gray-400 text-sm">search</span>
                         <input 
                             type="text" 
@@ -288,11 +303,109 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                             placeholder="Search log by ID, member, code..."
                         />
                   </div>
+                  
+                  <select
+                      value={selectedType}
+                      onChange={(e) => setSelectedType(e.target.value)}
+                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white min-w-[140px]"
+                  >
+                      <option value="ALL">All Types</option>
+                      <option value="RENTAL_OUT">Rental Out</option>
+                      <option value="RETURN">Return</option>
+                      <option value="REFILL_OUT">Refill Out</option>
+                      <option value="REFILL_IN">Refill In</option>
+                      <option value="DEBT_PAYMENT">Debt Payment</option>
+                      <option value="DEPOSIT_REFUND">Deposit Refund</option>
+                  </select>
+
+                  <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
+                    <button 
+                        onClick={() => setViewMode('table')}
+                        className={`p-1.5 rounded-md flex items-center justify-center transition-all ${viewMode === 'table' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}
+                        title="Table View"
+                    >
+                        <span className="material-icons text-xl">table_chart</span>
+                    </button>
+                    <button 
+                        onClick={() => setViewMode('card')}
+                        className={`p-1.5 rounded-md flex items-center justify-center transition-all ${viewMode === 'card' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}
+                        title="Card View"
+                    >
+                        <span className="material-icons text-xl">grid_view</span>
+                    </button>
+                  </div>
               </div>
 
               <div className="space-y-3">
                   {filteredLogs.length > 0 ? (
-                      filteredLogs.map(t => {
+                      viewMode === 'table' ? (
+                          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-left text-sm">
+                                    <thead className="bg-gray-50 border-b border-gray-200">
+                                        <tr>
+                                            <th className="px-6 py-3 font-semibold text-gray-700 w-40">Date</th>
+                                            <th className="px-6 py-3 font-semibold text-gray-700 w-32">Type</th>
+                                            <th className="px-6 py-3 font-semibold text-gray-700">Item Details</th>
+                                            <th className="px-6 py-3 font-semibold text-gray-700">Related Party</th>
+                                            <th className="px-6 py-3 font-semibold text-gray-700 text-right">Amount</th>
+                                            <th className="px-6 py-3 font-semibold text-gray-700 text-right">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {filteredLogs.map(t => {
+                                            const cyl = cylinders.find(c => c.id === t.cylinderId);
+                                            const member = members.find(m => m.id === t.memberId);
+                                            const station = stations.find(s => s.id === t.refillStationId);
+                                            return (
+                                                <tr key={t.id} className="hover:bg-gray-50">
+                                                    <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
+                                                        <div className="font-medium text-gray-800">{new Date(t.date).toLocaleDateString()}</div>
+                                                        <div className="text-xs">{new Date(t.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${getTypeBadgeClass(t.type)}`}>
+                                                            {t.type.replace('_', ' ')}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        {cyl ? (
+                                                            <div>
+                                                                <div className="font-mono font-medium text-gray-800">{cyl.serialCode}</div>
+                                                                <div className="text-xs text-gray-500">{cyl.gasType} • {cyl.size}</div>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-gray-400 italic">N/A</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-4 text-gray-700">
+                                                        {member ? member.companyName : (station ? station.name : '-')}
+                                                    </td>
+                                                    <td className="px-6 py-4 text-right font-medium">
+                                                        {t.cost ? formatIDR(t.cost) : '-'}
+                                                    </td>
+                                                    <td className="px-6 py-4 text-right">
+                                                        {t.paymentStatus ? (
+                                                            <span className={`text-xs px-2 py-0.5 rounded font-bold uppercase ${t.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                                {t.paymentStatus}
+                                                            </span>
+                                                        ) : t.rentalDuration ? (
+                                                            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                                                                {t.rentalDuration} Days
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-gray-400">-</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                              </div>
+                          </div>
+                      ) : (
+                        filteredLogs.map(t => {
                           const info = getTxDescription(t);
                           return (
                             <div key={t.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex gap-4 items-start">
@@ -317,13 +430,24 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                                 {t.rentalDuration} Days
                                             </span>
                                         )}
+                                        {t.paymentStatus && (
+                                             <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${t.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                {t.paymentStatus}
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
+                                {t.cost && (
+                                    <div className="text-right">
+                                        <span className="block font-bold text-gray-700 text-sm">{formatIDR(t.cost)}</span>
+                                    </div>
+                                )}
                             </div>
                           );
-                      })
+                        })
+                      )
                   ) : (
-                      <div className="p-12 text-center text-gray-400">
+                      <div className="p-12 text-center text-gray-400 bg-white rounded-xl border border-gray-200 border-dashed">
                           <span className="material-icons text-3xl mb-2">search_off</span>
                           <p>No transactions found matching filter.</p>
                       </div>

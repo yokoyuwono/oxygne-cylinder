@@ -57,7 +57,7 @@ export const MOCK_REFILL_PRICES: RefillPrice[] = [
 ];
 
 // Fallback prices in IDR
-export const DEFAULT_PRICES: Record<GasType, Record<CylinderSize, number>> = {
+export const DEFAULT_PRICES: Partial<Record<GasType, Record<CylinderSize, number>>> = {
     [GasType.Oxygen]: { [CylinderSize.Small]: 75000, [CylinderSize.Medium]: 150000, [CylinderSize.Large]: 225000 },
     [GasType.Acetylene]: { [CylinderSize.Small]: 150000, [CylinderSize.Medium]: 300000, [CylinderSize.Large]: 450000 },
     [GasType.Argon]: { [CylinderSize.Small]: 180000, [CylinderSize.Medium]: 375000, [CylinderSize.Large]: 600000 },
