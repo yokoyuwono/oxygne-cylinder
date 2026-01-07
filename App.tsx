@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
@@ -7,6 +8,7 @@ import MembersView from './components/MembersView';
 import ChatBot from './components/ChatBot';
 import RentalForm from './components/RentalForm';
 import RefillView from './components/RefillView';
+import DeliveryView from './components/DeliveryView';
 import ReportsView from './components/ReportsView';
 import Login from './components/Login';
 import AdminView from './components/AdminView';
@@ -364,6 +366,40 @@ const App: React.FC = () => {
       setTransactions(prev => [...prev, ...newTransactions]);
   };
 
+  // -- Delivery Handler --
+  const handleDeliverCylinders = async (cylinderIds: string[], dateStr: string) => {
+    const formattedDate = new Date(dateStr).toISOString();
+    
+    const newTransactions: Transaction[] = cylinderIds.map(id => ({
+        id: `t-del-${Date.now()}-${id}`,
+        cylinderId: id,
+        type: 'DELIVERY',
+        date: formattedDate
+    }));
+
+    // Update Cylinders
+    await supabase.from('cylinders').update({ 
+        status: CylinderStatus.Delivery, 
+        lastLocation: 'In Transit' 
+    }).in('id', cylinderIds);
+
+    // Add Transactions
+    await supabase.from('transactions').insert(newTransactions);
+
+    // Update Local State
+    setCylinders(prev => prev.map(c => {
+        if (cylinderIds.includes(c.id)) {
+            return {
+                ...c,
+                status: CylinderStatus.Delivery,
+                lastLocation: 'In Transit'
+            };
+        }
+        return c;
+    }));
+    setTransactions(prev => [...prev, ...newTransactions]);
+  };
+
   // Handler for rental transactions (Rentals AND Returns)
   const handleRental = async (
     memberId: string, 
@@ -502,6 +538,12 @@ const App: React.FC = () => {
               gasPrices={gasPrices}
               transactions={transactions}
               onCompleteRental={handleRental} 
+            />
+          } />
+          <Route path="/delivery" element={
+            <DeliveryView
+              cylinders={cylinders}
+              onDeliver={handleDeliverCylinders}
             />
           } />
           <Route path="/refill" element={

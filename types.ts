@@ -27,6 +27,7 @@ export enum CylinderStatus {
   EmptyRefill = 'Empty (Needs Refill)',
   Refilling = 'Refilling',
   Damaged = 'Damaged',
+  Delivery = 'Delivery',
 }
 
 export enum CylinderSize {
@@ -108,6 +109,7 @@ export interface RefillPrice {
   gasType: GasType;
   size: CylinderSize;
   price: number; // Cost to refill at this station
+  serialCode?: string; // Vendor's code/SKU for this item
 }
 
 export interface Transaction {
@@ -115,7 +117,7 @@ export interface Transaction {
   cylinderId?: string; // Optional for DEBT_PAYMENT
   memberId?: string;
   refillStationId?: string; // For refill transactions
-  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEPOSIT_REFUND';
+  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEPOSIT_REFUND' | 'DELIVERY';
   date: string;
   rentalDuration?: number; // Days held (relevant for RETURN type)
   cost?: number; // Cost of refill or rental

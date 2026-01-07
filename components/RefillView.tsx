@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Cylinder, CylinderStatus, RefillStation, GasType, RefillPrice, CylinderSize } from '../types';
 
 interface RefillViewProps {
@@ -41,8 +40,37 @@ const RefillView: React.FC<RefillViewProps> = ({
   
   const [editingPrices, setEditingPrices] = useState<RefillPrice[]>([]);
 
-  const emptyCylinders = cylinders.filter(c => c.status === CylinderStatus.EmptyRefill);
-  const refillingCylinders = cylinders.filter(c => c.status === CylinderStatus.Refilling);
+  // -- Derived Data --
+  const emptyCylinders = useMemo(() => cylinders.filter(c => c.status === CylinderStatus.EmptyRefill), [cylinders]);
+  const refillingCylinders = useMemo(() => cylinders.filter(c => c.status === CylinderStatus.Refilling), [cylinders]);
+
+  // -- Dispatch Logic --
+  // 1. Get prices for selected vendor
+  const vendorPrices = useMemo(() => 
+    refillPrices.filter(p => p.stationId === selectedStationId),
+  [refillPrices, selectedStationId]);
+
+  // 2. Filter cylinders that this vendor can actually accept (based on defined prices)
+  const vendorCompatibleCylinders = useMemo(() => {
+    if (!selectedStationId) return [];
+    
+    return emptyCylinders.filter(c => {
+        // Find ALL matching price configs for this gas/size (vendor might have multiple SKUs for same gas)
+        const matchingConfigs = vendorPrices.filter(p => p.gasType === c.gasType && p.size === c.size);
+        if (matchingConfigs.length === 0) return false; // Vendor doesn't trade this gas/size at all
+
+        // Check if ANY of the matching prices allow this cylinder
+        // A match occurs if:
+        // A) The price config has NO serialCode (accepts any SKU for this gas/size)
+        // B) The cylinder's serial prefix CONTAINS the vendor's serialCode
+        return matchingConfigs.some(config => {
+            if (!config.serialCode) return true;
+            
+            const cylinderPrefix = c.serialCode.split('-')[0];
+            return cylinderPrefix.includes(config.serialCode);
+        });
+    });
+  }, [emptyCylinders, vendorPrices, selectedStationId]);
 
   const showFeedback = (msg: string, type: 'success' | 'error' = 'success') => {
       setFeedback({ msg, type });
@@ -76,13 +104,17 @@ const RefillView: React.FC<RefillViewProps> = ({
         const cyl = cylinders.find(c => c.id === id);
         if (!cyl) return;
         
-        const key = `${cyl.gasType}-${cyl.size}`;
+        // Find the specific price that matched this cylinder
+        const cylinderSku = cyl.serialCode.split('-')[0];
+        const priceEntry = vendorPrices.find(p => 
+            p.gasType === cyl.gasType && 
+            p.size === cyl.size &&
+            (!p.serialCode || cylinderSku.includes(p.serialCode!))
+        );
+
+        const key = `${cyl.gasType}-${cyl.size}-${priceEntry?.serialCode || 'GENERIC'}`;
+        
         if (!summaryMap[key]) {
-            const priceEntry = refillPrices.find(p => 
-                p.stationId === selectedStationId && 
-                p.gasType === cyl.gasType && 
-                p.size === cyl.size
-            );
             summaryMap[key] = {
                 count: 0,
                 price: priceEntry ? priceEntry.price : 0,
@@ -189,7 +221,7 @@ const RefillView: React.FC<RefillViewProps> = ({
   const addPriceRow = () => {
       setEditingPrices([
           ...editingPrices, 
-          { id: `rp-temp-${Date.now()}`, stationId: currentStation.id || '', gasType: GasType.Oxygen, size: CylinderSize.Large, price: 0 }
+          { id: `rp-temp-${Date.now()}`, stationId: currentStation.id || '', gasType: GasType.Oxygen, size: CylinderSize.Large, price: 0, serialCode: '' }
       ]);
   };
 
@@ -208,7 +240,7 @@ const RefillView: React.FC<RefillViewProps> = ({
   // -- RENDER HELPERS --
 
   // Mobile Card Item
-  const renderCylinderCard = (c: Cylinder, isSelected: boolean) => (
+  const renderCylinderCard = (c: Cylinder, isSelected: boolean, vendorSku?: string, price?: number) => (
       <div 
         key={c.id} 
         onClick={() => toggleSelection(c.id)}
@@ -225,6 +257,7 @@ const RefillView: React.FC<RefillViewProps> = ({
              <div>
                 <div className="flex items-center gap-2">
                     <span className="font-bold font-mono text-gray-900">{c.serialCode}</span>
+                    {vendorSku && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 rounded border border-indigo-200 font-mono">SKU: {vendorSku}</span>}
                 </div>
                 <div className="text-xs text-gray-500 flex gap-2 mt-0.5">
                     <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{c.gasType}</span>
@@ -233,6 +266,9 @@ const RefillView: React.FC<RefillViewProps> = ({
              </div>
         </div>
         <div className="text-right">
+             {price !== undefined && (
+                <p className="font-bold text-gray-800 text-sm">{formatIDR(price)}</p>
+             )}
              <div className="text-xs text-gray-400 flex items-center gap-1 justify-end">
                 <span className="material-icons text-[10px]">place</span> 
                 <span className="truncate max-w-[80px]">{c.lastLocation}</span>
@@ -285,156 +321,189 @@ const RefillView: React.FC<RefillViewProps> = ({
 
       {/* TAB: DISPATCH */}
       {activeTab === 'dispatch' && (
-          <div className="flex flex-col lg:flex-row gap-6 animate-fade-in">
-              <div className="flex-1 bg-white lg:bg-transparent rounded-xl lg:rounded-none lg:border-none shadow-sm lg:shadow-none border border-gray-200 lg:border-0 overflow-hidden flex flex-col">
-                  
-                  {/* Summary Bar */}
-                  <div className="p-4 bg-gray-50 lg:bg-gray-50 lg:border lg:border-gray-100 lg:rounded-t-xl border-b border-gray-100 flex items-center justify-between gap-6 sticky top-0 z-10 lg:static">
-                      <div className="flex items-center gap-4 text-sm">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-orange-400"></span>
-                            <span className="text-gray-600">Pending: <strong>{emptyCylinders.length}</strong></span>
-                          </div>
-                          <div className="hidden md:flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
-                            <span className="text-gray-600">Selected: <strong>{selectedIds.length}</strong></span>
-                          </div>
-                      </div>
-                      <button onClick={() => handleSelectAll(emptyCylinders)} className="text-sm text-indigo-600 font-medium hover:underline">
-                          {selectedIds.length === emptyCylinders.length && emptyCylinders.length > 0 ? 'Deselect All' : 'Select All'}
-                      </button>
-                  </div>
-
-                  {/* List Content */}
-                  <div className="flex-1 lg:bg-white lg:border lg:border-gray-200 lg:rounded-b-xl lg:overflow-hidden">
-                      {emptyCylinders.length > 0 ? (
-                        <>
-                            {/* Desktop Table */}
-                            <div className="hidden lg:block overflow-y-auto max-h-[600px]">
-                                <table className="w-full text-left text-sm">
-                                <thead className="bg-white sticky top-0 shadow-sm z-10">
-                                    <tr className="text-gray-500 uppercase text-xs tracking-wider">
-                                        <th className="px-6 py-3 w-10"></th>
-                                        <th className="px-6 py-3">Serial Code</th>
-                                        <th className="px-6 py-3">Type / Size</th>
-                                        <th className="px-6 py-3">Location</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-50">
-                                    {emptyCylinders.map(c => (
-                                        <tr 
-                                            key={c.id} 
-                                            className={`group cursor-pointer transition-colors ${selectedIds.includes(c.id) ? 'bg-indigo-50/50' : 'hover:bg-gray-50'}`} 
-                                            onClick={() => toggleSelection(c.id)}
-                                        >
-                                            <td className="px-6 py-4">
-                                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${selectedIds.includes(c.id) ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300 bg-white'}`}>
-                                                    {selectedIds.includes(c.id) && <span className="material-icons text-white text-sm">check</span>}
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4 font-mono font-medium text-gray-900 group-hover:text-indigo-600 transition-colors">{c.serialCode}</td>
-                                            <td className="px-6 py-4 text-gray-600">
-                                                    <span className="px-2 py-1 rounded bg-gray-100 text-xs font-medium">{c.gasType}</span>
-                                                    <span className="ml-2 text-xs text-gray-400">{c.size}</span>
-                                            </td>
-                                            <td className="px-6 py-4 text-gray-500 text-xs">{c.lastLocation}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                                </table>
-                            </div>
-
-                            {/* Mobile Card List */}
-                            <div className="lg:hidden p-4 bg-gray-50 min-h-[300px]">
-                                {emptyCylinders.map(c => renderCylinderCard(c, selectedIds.includes(c.id)))}
-                            </div>
-                        </>
-                      ) : (
-                          <div className="flex flex-col items-center justify-center h-64 text-gray-400 bg-white lg:bg-transparent">
-                              <span className="material-icons text-4xl mb-2 text-gray-300">check_circle</span>
-                              <p>All cylinders are stocked or rented.</p>
-                          </div>
-                      )}
+          <div className="flex flex-col gap-6 animate-fade-in">
+              {/* STEP 1: Vendor Selection */}
+              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                  <div className="flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
+                     <div className="w-full md:w-1/2">
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-2">1. Select Vendor</label>
+                        <div className="relative">
+                            <span className="material-icons absolute left-3 top-3 text-gray-400">store</span>
+                            <select 
+                                value={selectedStationId}
+                                onChange={(e) => { setSelectedStationId(e.target.value); setSelectedIds([]); }}
+                                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white appearance-none"
+                            >
+                                <option value="">-- Choose Refill Station --</option>
+                                {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                            <span className="material-icons absolute right-3 top-3 text-gray-400 pointer-events-none">expand_more</span>
+                        </div>
+                     </div>
+                     
+                     {selectedStationId && (
+                         <div className="w-full md:w-auto flex items-center gap-4 bg-gray-50 px-4 py-3 rounded-lg border border-gray-100">
+                             <div>
+                                 <p className="text-xs text-gray-500 uppercase">Compatible Empty</p>
+                                 <p className="text-xl font-bold text-gray-800">{vendorCompatibleCylinders.length}</p>
+                             </div>
+                             <div className="h-8 w-px bg-gray-300"></div>
+                             <div>
+                                 <p className="text-xs text-gray-500 uppercase">Total Empty</p>
+                                 <p className="text-xl font-bold text-gray-400">{emptyCylinders.length}</p>
+                             </div>
+                         </div>
+                     )}
                   </div>
               </div>
 
-              {/* Desktop Sidebar */}
-              <div className="hidden lg:block w-80 space-y-4">
-                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sticky top-6">
-                    <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                        <span className="material-icons text-indigo-600 text-sm">settings_input_component</span>
-                        Dispatch Config
-                    </h3>
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Select Vendor</label>
-                            <select 
-                                value={selectedStationId}
-                                onChange={(e) => setSelectedStationId(e.target.value)}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+              {/* STEP 2: Cylinder List */}
+              {selectedStationId ? (
+                <div className="flex flex-col lg:flex-row gap-6">
+                    <div className="flex-1 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col min-h-[500px]">
+                        {/* List Header */}
+                        <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center justify-between sticky top-0 z-10">
+                            <div>
+                                <h3 className="font-bold text-gray-800 text-sm">2. Select Cylinders to Refill</h3>
+                                <p className="text-xs text-gray-500">Only showing items compatible with {stations.find(s => s.id === selectedStationId)?.name}</p>
+                            </div>
+                            <button 
+                                onClick={() => handleSelectAll(vendorCompatibleCylinders)} 
+                                className="text-sm text-indigo-600 font-medium hover:underline bg-white px-3 py-1 rounded border border-gray-200"
                             >
-                                <option value="">-- Choose Station --</option>
-                                {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                            </select>
+                                {selectedIds.length === vendorCompatibleCylinders.length && vendorCompatibleCylinders.length > 0 ? 'Deselect All' : 'Select All'}
+                            </button>
                         </div>
+
+                        {/* Filtered List */}
+                        <div className="flex-1 overflow-y-auto max-h-[600px]">
+                            {vendorCompatibleCylinders.length > 0 ? (
+                                <>
+                                    {/* Desktop Table */}
+                                    <div className="hidden lg:block">
+                                        <table className="w-full text-left text-sm">
+                                            <thead className="bg-white border-b border-gray-100 sticky top-0">
+                                                <tr className="text-gray-500 uppercase text-xs tracking-wider">
+                                                    <th className="px-6 py-3 w-10"></th>
+                                                    <th className="px-6 py-3">Serial Code</th>
+                                                    <th className="px-6 py-3">Vendor SKU</th>
+                                                    <th className="px-6 py-3">Type / Size</th>
+                                                    <th className="px-6 py-3 text-right">Unit Cost</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-50">
+                                                {vendorCompatibleCylinders.map(c => {
+                                                    const cylinderSku = c.serialCode.split('-')[0];
+                                                    // Find best matching price config for this specific cylinder at this vendor
+                                                    // We look for a config that matches the gas/size AND (matches the SKU OR has no SKU)
+                                                    const priceConfig = vendorPrices.find(p => 
+                                                        p.gasType === c.gasType && 
+                                                        p.size === c.size &&
+                                                        (!p.serialCode || cylinderSku.includes(p.serialCode))
+                                                    );
+
+                                                    return (
+                                                        <tr 
+                                                            key={c.id} 
+                                                            className={`group cursor-pointer transition-colors ${selectedIds.includes(c.id) ? 'bg-indigo-50/50' : 'hover:bg-gray-50'}`} 
+                                                            onClick={() => toggleSelection(c.id)}
+                                                        >
+                                                            <td className="px-6 py-4">
+                                                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${selectedIds.includes(c.id) ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300 bg-white'}`}>
+                                                                    {selectedIds.includes(c.id) && <span className="material-icons text-white text-sm">check</span>}
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-6 py-4 font-mono font-medium text-gray-900 group-hover:text-indigo-600 transition-colors">{c.serialCode}</td>
+                                                            <td className="px-6 py-4">
+                                                                <span className="font-mono text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded border border-gray-200">
+                                                                    {/* Display the matching SKU if available, otherwise the cylinder's own SKU prefix */}
+                                                                    {priceConfig?.serialCode || cylinderSku}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-gray-600">
+                                                                <span className="px-2 py-1 rounded bg-gray-100 text-xs font-medium">{c.gasType}</span>
+                                                                <span className="ml-2 text-xs text-gray-400">{c.size}</span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-right font-medium text-gray-700">
+                                                                {priceConfig ? formatIDR(priceConfig.price) : '-'}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    {/* Mobile Card List */}
+                                    <div className="lg:hidden p-4 bg-gray-50 space-y-3">
+                                        {vendorCompatibleCylinders.map(c => {
+                                             const cylinderSku = c.serialCode.split('-')[0];
+                                             const priceConfig = vendorPrices.find(p => 
+                                                p.gasType === c.gasType && 
+                                                p.size === c.size &&
+                                                (!p.serialCode || cylinderSku.includes(p.serialCode))
+                                             );
+                                             return renderCylinderCard(c, selectedIds.includes(c.id), priceConfig?.serialCode || cylinderSku, priceConfig?.price);
+                                        })}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                                    <span className="material-icons text-4xl mb-2 text-gray-300">block</span>
+                                    <p>No compatible empty cylinders found for this vendor.</p>
+                                    <p className="text-xs mt-1">Check vendor pricing and SKU matching.</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Summary / Action Panel */}
+                    <div className="w-full lg:w-80 bg-white rounded-xl shadow-lg border border-gray-200 p-6 flex flex-col h-fit sticky top-6">
+                        <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                            <span className="material-icons text-indigo-600 text-sm">summarize</span>
+                            Dispatch Summary
+                        </h3>
                         
-                        <div className="bg-gray-50 rounded-lg p-4 border border-gray-100">
-                            <div className="flex justify-between text-sm mb-2">
+                        <div className="space-y-4 mb-6">
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-500">Destination</span>
+                                <span className="font-medium text-gray-800 text-right">{stations.find(s => s.id === selectedStationId)?.name}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
                                 <span className="text-gray-500">Items Selected</span>
                                 <span className="font-bold text-gray-800">{selectedIds.length}</span>
                             </div>
-                            <div className="flex justify-between text-sm border-t border-gray-200 pt-2">
-                                <span className="text-gray-500">Est. Cost</span>
-                                <span className="font-bold text-indigo-600">{formatIDR(estimatedCost)}</span>
+                            <div className="border-t border-gray-100 pt-3 flex justify-between items-end">
+                                <span className="text-gray-500 text-sm">Estimated Cost</span>
+                                <span className="font-bold text-xl text-indigo-600">{formatIDR(estimatedCost)}</span>
                             </div>
                         </div>
 
                         <button 
                             onClick={handleDispatchClick}
-                            disabled={selectedIds.length === 0 || !selectedStationId}
-                            className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-all flex justify-center items-center gap-2 shadow-sm"
+                            disabled={selectedIds.length === 0}
+                            className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-all flex justify-center items-center gap-2 shadow-lg shadow-indigo-200"
                         >
-                            <span>Dispatch</span>
+                            <span>Dispatch Now</span>
                             <span className="material-icons text-sm">arrow_forward</span>
                         </button>
                     </div>
-                  </div>
-              </div>
-
-              {/* Mobile Sticky Action Bar */}
-              <div className="lg:hidden fixed bottom-[58px] left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-30">
-                 <div className="flex flex-col gap-3">
-                     <div className="flex gap-2">
-                         <select 
-                            value={selectedStationId}
-                            onChange={(e) => setSelectedStationId(e.target.value)}
-                            className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-                        >
-                            <option value="">-- Choose Station --</option>
-                            {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                        <div className="flex items-center justify-center px-4 bg-gray-50 border border-gray-200 rounded-lg text-sm font-bold text-indigo-600 min-w-[3rem]">
-                           {selectedIds.length}
-                        </div>
-                     </div>
-                     <button 
-                        onClick={handleDispatchClick}
-                        disabled={selectedIds.length === 0 || !selectedStationId}
-                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:text-gray-500 text-white rounded-xl font-bold transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
-                    >
-                        <span>Dispatch Order</span>
-                        <span className="material-icons text-sm">send</span>
-                    </button>
-                 </div>
-              </div>
+                </div>
+              ) : (
+                // Empty State when no vendor selected
+                <div className="flex flex-col items-center justify-center h-64 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl text-gray-400">
+                    <span className="material-icons text-4xl mb-2">store</span>
+                    <p>Please select a vendor above to start dispatch.</p>
+                </div>
+              )}
           </div>
       )}
 
-      {/* TAB: RESTOCK */}
+      {/* TAB: RESTOCK (Kept similar but adapted structure if needed, focusing on dispatch revamp mainly) */}
       {activeTab === 'restock' && (
+          // ... (Rest of component unchanged)
           <div className="flex flex-col lg:flex-row gap-6 animate-fade-in">
              <div className="flex-1 bg-white lg:bg-transparent rounded-xl lg:rounded-none lg:border-none shadow-sm lg:shadow-none border border-gray-200 lg:border-0 overflow-hidden flex flex-col">
-                  
                   {/* Summary Bar */}
                   <div className="p-4 bg-gray-50 lg:bg-gray-50 lg:border lg:border-gray-100 lg:rounded-t-xl border-b border-gray-100 flex items-center justify-between gap-6 sticky top-0 z-10 lg:static">
                       <div className="flex items-center gap-4 text-sm">
@@ -488,10 +557,9 @@ const RefillView: React.FC<RefillViewProps> = ({
                                 </tbody>
                                 </table>
                             </div>
-
                              {/* Mobile Card List */}
                              <div className="lg:hidden p-4 bg-gray-50 min-h-[300px]">
-                                {refillingCylinders.map(c => renderCylinderCard(c, selectedIds.includes(c.id)))}
+                                {refillingCylinders.map(c => renderCylinderCard(c, selectedIds.includes(c.id), undefined, undefined))}
                             </div>
                         </>
                       ) : (
@@ -576,6 +644,7 @@ const RefillView: React.FC<RefillViewProps> = ({
 
       {/* TAB: STATIONS */}
       {activeTab === 'stations' && (
+          // ... (Rest of component unchanged)
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden animate-fade-in relative">
              
              {/* Mobile Header Action */}
@@ -929,8 +998,8 @@ const RefillView: React.FC<RefillViewProps> = ({
                                 <p className="text-xs text-center text-gray-400 py-2">No custom rates configured.</p>
                             ) : (
                                 editingPrices.map((price, idx) => (
-                                    <div key={idx} className="flex gap-2 items-center">
-                                        <div className="grid grid-cols-2 gap-2 flex-1">
+                                    <div key={idx} className="flex gap-2 items-center flex-wrap sm:flex-nowrap">
+                                        <div className="grid grid-cols-2 gap-2 flex-1 min-w-[140px]">
                                             <select 
                                                 value={price.gasType}
                                                 onChange={(e) => updatePriceRow(idx, 'gasType', e.target.value)}
@@ -946,13 +1015,22 @@ const RefillView: React.FC<RefillViewProps> = ({
                                                 {Object.values(CylinderSize).map(s => <option key={s} value={s}>{s}</option>)}
                                             </select>
                                         </div>
-                                        <input 
-                                            type="number"
-                                            value={price.price}
-                                            onChange={(e) => updatePriceRow(idx, 'price', parseFloat(e.target.value))}
-                                            className="w-24 text-xs border-gray-300 rounded-lg px-2 py-2 outline-none focus:border-indigo-500 border"
-                                            placeholder="Cost"
-                                        />
+                                        <div className="flex gap-2 items-center flex-1">
+                                            <input 
+                                                type="text"
+                                                value={price.serialCode || ''}
+                                                onChange={(e) => updatePriceRow(idx, 'serialCode', e.target.value)}
+                                                className="w-full text-xs border-gray-300 rounded-lg px-2 py-2 outline-none focus:border-indigo-500 border uppercase font-mono"
+                                                placeholder="Code/SKU (Optional)"
+                                            />
+                                            <input 
+                                                type="number"
+                                                value={price.price}
+                                                onChange={(e) => updatePriceRow(idx, 'price', parseFloat(e.target.value))}
+                                                className="w-24 text-xs border-gray-300 rounded-lg px-2 py-2 outline-none focus:border-indigo-500 border"
+                                                placeholder="Cost"
+                                            />
+                                        </div>
                                         <button type="button" onClick={() => removePriceRow(idx)} className="text-gray-400 hover:text-red-500 p-1">
                                             <span className="material-icons text-sm">remove_circle</span>
                                         </button>

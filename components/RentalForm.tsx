@@ -22,6 +22,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
   // -- UI State --
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [feedback, setFeedback] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+  const [transactionSource, setTransactionSource] = useState<'TOKO' | 'DELIVERY'>('TOKO');
 
   // -- Mobile View State --
   const [mobileTab, setMobileTab] = useState<'rent' | 'return'>('rent');
@@ -332,6 +333,25 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">New Transaction</h1>
             <p className="text-gray-500 mb-8 text-sm md:text-base">Select a customer to begin renting or processing returns.</p>
             
+            <div className="flex justify-center mb-6">
+                <div className="bg-gray-100 p-1.5 rounded-xl flex gap-1">
+                    <button
+                        onClick={() => setTransactionSource('TOKO')}
+                        className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${transactionSource === 'TOKO' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
+                    >
+                        <span className="material-icons text-lg">store</span>
+                        Store (Toko)
+                    </button>
+                    <button
+                        onClick={() => setTransactionSource('DELIVERY')}
+                        className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${transactionSource === 'DELIVERY' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
+                    >
+                        <span className="material-icons text-lg">local_shipping</span>
+                        Delivery
+                    </button>
+                </div>
+            </div>
+
             <div className="relative text-left">
                 <input 
                   ref={memberInputRef}
@@ -417,6 +437,11 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                 Debt: {formatIDR(selectedMember.totalDebt)}
                             </span>
                         )}
+                        {/* Transaction Source Badge */}
+                        <span className={`flex items-center gap-1 font-bold px-2 rounded ${transactionSource === 'TOKO' ? 'bg-indigo-50 text-indigo-600' : 'bg-cyan-50 text-cyan-600'}`}>
+                           <span className="material-icons text-[10px] md:text-xs">{transactionSource === 'TOKO' ? 'store' : 'local_shipping'}</span>
+                           {transactionSource}
+                        </span>
                     </div>
                 </div>
             </div>

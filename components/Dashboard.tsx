@@ -1,5 +1,4 @@
-
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { Cylinder, CylinderStatus, GasType, Transaction, Member, RefillStation, MemberStatus } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { useNavigate } from 'react-router-dom';
@@ -11,10 +10,11 @@ interface DashboardProps {
   stations: RefillStation[];
 }
 
-const COLORS = ['#22c55e', '#3b82f6', '#f97316', '#eab308', '#ef4444'];
+const COLORS = ['#22c55e', '#3b82f6', '#f97316', '#eab308', '#ef4444', '#8b5cf6'];
 
 const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members, stations }) => {
   const navigate = useNavigate();
+  const [overdueFilter, setOverdueFilter] = useState<'3m' | '6m' | '12m'>('3m');
 
   // -- Metrics Calculation --
   const totalCylinders = cylinders.length;
@@ -22,24 +22,45 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
   const availableCylinders = cylinders.filter(c => c.status === CylinderStatus.Available).length;
   const needRefill = cylinders.filter(c => c.status === CylinderStatus.EmptyRefill).length;
   const refilling = cylinders.filter(c => c.status === CylinderStatus.Refilling).length;
+  const delivery = cylinders.filter(c => c.status === CylinderStatus.Delivery).length;
   const utilizationRate = totalCylinders > 0 ? Math.round((rentedCylinders / totalCylinders) * 100) : 0;
 
-  // Calculate Long Term Rentals (> 60 Days)
-  const longTermRentals = cylinders.filter(c => {
-    if (c.status !== CylinderStatus.Rented) return false;
-    
-    // Find latest rental transaction for this cylinder
-    const lastRentTx = transactions
-        .filter(t => t.cylinderId === c.id && t.type === 'RENTAL_OUT')
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-    
-    if (!lastRentTx) return false;
-    
-    const diffMs = new Date().getTime() - new Date(lastRentTx.date).getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    
-    return diffDays > 60; // More than 2 months
-  }).length;
+  // -- Overdue / Long Term Logic --
+  const overdueData = useMemo(() => {
+      const rented = cylinders.filter(c => c.status === CylinderStatus.Rented);
+      return rented.map(c => {
+          // Find the latest rental transaction for this cylinder
+          const lastRentTx = transactions
+            .filter(t => t.cylinderId === c.id && t.type === 'RENTAL_OUT')
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+          
+          if (!lastRentTx) return null;
+
+          const diffMs = new Date().getTime() - new Date(lastRentTx.date).getTime();
+          const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          const member = members.find(m => m.id === c.currentHolder);
+
+          return {
+              id: c.id,
+              serialCode: c.serialCode,
+              gasType: c.gasType,
+              size: c.size,
+              member: member,
+              rentDate: lastRentTx.date,
+              days: days
+          };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .sort((a, b) => b.days - a.days); // Sort by longest duration first
+  }, [cylinders, transactions, members]);
+
+  const filteredOverdue = overdueData.filter(item => {
+      if (overdueFilter === '12m') return item.days > 365;
+      if (overdueFilter === '6m') return item.days > 180;
+      return item.days > 90; // '3m' default
+  });
+
+  const longTermRentalsCount = overdueData.filter(i => i.days > 60).length; // Metric for card (> 2 months)
 
   // -- Refund Alerts --
   const membersReadyForRefund = members.filter(m => {
@@ -65,6 +86,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
     { name: 'Rented', value: rentedCylinders },
     { name: 'Empty', value: needRefill },
     { name: 'Refilling', value: refilling },
+    { name: 'Delivery', value: delivery },
     { name: 'Damaged', value: cylinders.filter(c => c.status === CylinderStatus.Damaged).length },
   ].filter(d => d.value > 0);
 
@@ -111,6 +133,11 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
           description = `Debt payment from ${member?.companyName}`;
           icon = 'payments';
           colorClass = 'text-emerald-600 bg-emerald-50';
+          break;
+        case 'DELIVERY':
+          description = `Dispatched ${cyl?.serialCode} for delivery`;
+          icon = 'local_shipping';
+          colorClass = 'text-cyan-600 bg-cyan-50';
           break;
       }
 
@@ -210,7 +237,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
           </div>
         </div>
 
-        {/* New Long Term Rentals Card */}
+        {/* Long Term Rentals Card */}
         <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 transition-transform hover:-translate-y-1">
           <div className="p-3 bg-purple-50 text-purple-600 rounded-lg">
              <span className="material-icons text-2xl">watch_later</span>
@@ -218,7 +245,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
           <div>
             <p className="text-sm text-gray-500 font-medium">Long Term Rent</p>
             <div className="flex items-baseline gap-2">
-                <p className="text-2xl font-bold text-gray-800">{longTermRentals}</p>
+                <p className="text-2xl font-bold text-gray-800">{longTermRentalsCount}</p>
                 <span className="text-xs text-purple-400 font-medium">{'>'} 2 mo</span>
             </div>
           </div>
@@ -230,6 +257,89 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
         
         {/* Charts Section (Left 2 cols) */}
         <div className="lg:col-span-2 space-y-6">
+            
+            {/* Long Duration Rentals List (New Feature) */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="p-6 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                        <span className="material-icons text-red-500 text-sm">history_toggle_off</span>
+                        Long Duration Rentals
+                    </h3>
+                    <div className="flex bg-gray-100 p-1 rounded-lg">
+                        <button 
+                            onClick={() => setOverdueFilter('3m')}
+                            className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${overdueFilter === '3m' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                            {'>'} 3 Months
+                        </button>
+                        <button 
+                            onClick={() => setOverdueFilter('6m')}
+                            className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${overdueFilter === '6m' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                            {'>'} 6 Months
+                        </button>
+                        <button 
+                            onClick={() => setOverdueFilter('12m')}
+                            className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${overdueFilter === '12m' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                            {'>'} 1 Year
+                        </button>
+                    </div>
+                </div>
+                
+                {filteredOverdue.length > 0 ? (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                            <thead className="bg-gray-50 text-gray-500 font-medium">
+                                <tr>
+                                    <th className="px-6 py-3">Asset</th>
+                                    <th className="px-6 py-3">Customer</th>
+                                    <th className="px-6 py-3">Rented Date</th>
+                                    <th className="px-6 py-3 text-right">Duration</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {filteredOverdue.slice(0, 5).map(item => (
+                                    <tr key={item.id} className="hover:bg-gray-50 group">
+                                        <td className="px-6 py-3">
+                                            <p className="font-bold font-mono text-gray-800 text-xs">{item.serialCode}</p>
+                                            <p className="text-[10px] text-gray-500">{item.gasType}</p>
+                                        </td>
+                                        <td className="px-6 py-3 text-gray-700 text-xs font-medium">
+                                            {item.member?.companyName || 'Unknown'}
+                                        </td>
+                                        <td className="px-6 py-3 text-gray-500 text-xs">
+                                            {new Date(item.rentDate).toLocaleDateString()}
+                                        </td>
+                                        <td className="px-6 py-3 text-right">
+                                            <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${
+                                                item.days > 365 ? 'bg-red-100 text-red-700' : 
+                                                item.days > 180 ? 'bg-orange-100 text-orange-700' : 
+                                                'bg-yellow-100 text-yellow-800'
+                                            }`}>
+                                                {item.days} days
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                        {filteredOverdue.length > 5 && (
+                            <div className="p-2 text-center border-t border-gray-100 bg-gray-50">
+                                <button onClick={() => navigate('/inventory')} className="text-xs text-indigo-600 font-bold hover:underline">
+                                    View all {filteredOverdue.length} overdue items
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <div className="p-8 text-center text-gray-400 text-sm bg-white">
+                        <span className="material-icons text-3xl mb-2 text-green-200">check_circle</span>
+                        <p>No cylinders found matching this duration.</p>
+                    </div>
+                )}
+            </div>
+
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                 <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
                     <span className="material-icons text-gray-400 text-sm">bar_chart</span>
@@ -306,11 +416,11 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                         <span className="text-sm font-semibold">Return</span>
                     </button>
                     <button 
-                        onClick={() => navigate('/refill')} 
+                        onClick={() => navigate('/delivery')} 
                         className="flex flex-col items-center justify-center p-4 rounded-xl bg-orange-50 text-orange-700 hover:bg-orange-100 transition-colors border border-orange-100"
                     >
                         <span className="material-icons mb-2">local_shipping</span>
-                        <span className="text-sm font-semibold">Dispatch</span>
+                        <span className="text-sm font-semibold">Delivery</span>
                     </button>
                     <button 
                         onClick={() => navigate('/inventory')} 

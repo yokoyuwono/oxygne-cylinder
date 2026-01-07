@@ -91,6 +91,10 @@ const Layout: React.FC<LayoutProps> = ({ children, currentUser, onLogout }) => {
             <span className="material-icons">shopping_cart_checkout</span>
             Rental Out
           </NavLink>
+          <NavLink to="/delivery" className={navLinkClass}>
+            <span className="material-icons">local_shipping</span>
+            Delivery
+          </NavLink>
           <NavLink to="/refill" className={navLinkClass}>
             <span className="material-icons">local_gas_station</span>
             Refill Management
@@ -152,9 +156,9 @@ const Layout: React.FC<LayoutProps> = ({ children, currentUser, onLogout }) => {
             <span className="material-icons text-2xl">shopping_cart</span>
             Rent
           </NavLink>
-          <NavLink to="/refill" className={bottomNavLinkClass}>
-            <span className="material-icons text-2xl">local_gas_station</span>
-            Refill
+          <NavLink to="/delivery" className={bottomNavLinkClass}>
+            <span className="material-icons text-2xl">local_shipping</span>
+            Deliver
           </NavLink>
           <NavLink to="/inventory" className={bottomNavLinkClass}>
             <span className="material-icons text-2xl">inventory_2</span>

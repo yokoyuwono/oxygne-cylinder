@@ -1,4 +1,5 @@
 
+
 import { Cylinder, CylinderSize, CylinderStatus, GasType, Member, MemberPrice, Transaction, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus } from './types';
 
 export const MOCK_USERS: AppUser[] = [
@@ -16,6 +17,7 @@ export const MOCK_MEMBERS: Member[] = [
 export const MOCK_REFILL_STATIONS: RefillStation[] = [
   { id: 'rs1', name: 'GasDepo Pusat', address: 'Jl. Industri No 5, Cikarang', contactPerson: 'Pak Joko', phone: '021-898989' },
   { id: 'rs2', name: 'Aneka Gas Bogor', address: 'Jl. Pajajaran No 12, Bogor', contactPerson: 'Ibu Lina', phone: '0251-334455' },
+  { id: 'rs3', name: 'Kediri Mulur', address: 'Jl. Kediri No 10', contactPerson: 'Pak Budi', phone: '08123456789' },
 ];
 
 export const MOCK_CYLINDERS: Cylinder[] = [
@@ -50,11 +52,13 @@ export const MOCK_MEMBER_PRICES: MemberPrice[] = [
   { id: 'mp6', memberId: 'm3', gasType: GasType.Oxygen, size: CylinderSize.Large, price: 165000 },
 ];
 
-export const MOCK_REFILL_PRICES: RefillPrice[] = [
-  { id: 'rp1', stationId: 'rs1', gasType: GasType.Oxygen, size: CylinderSize.Large, price: 50000 },
-  { id: 'rp2', stationId: 'rs1', gasType: GasType.Oxygen, size: CylinderSize.Medium, price: 35000 },
-  { id: 'rp3', stationId: 'rs2', gasType: GasType.Oxygen, size: CylinderSize.Large, price: 55000 }, // Slightly more expensive
-];
+// export const MOCK_REFILL_PRICES: RefillPrice[] = [
+//   { id: 'rp1', stationId: 'rs1', gasType: GasType.Oxygen, size: CylinderSize.Large, price: 50000 },
+//   { id: 'rp2', stationId: 'rs1', gasType: GasType.Oxygen, size: CylinderSize.Medium, price: 35000 },
+//   { id: 'rp3', stationId: 'rs2', gasType: GasType.Oxygen, size: CylinderSize.Large, price: 55000 }, // Slightly more expensive
+//   { id: 'rp4', stationId: 'rs3', gasType: GasType.Oxygen, size: CylinderSize.Large, price: 100000, serialCode: 'YK' },
+//   { id: 'rp5', stationId: 'rs3', gasType: GasType.Acetylene, size: CylinderSize.Large, price: 120000, serialCode: 'YK' },
+// ];
 
 // Fallback prices in IDR
 export const DEFAULT_PRICES: Partial<Record<GasType, Record<CylinderSize, number>>> = {
