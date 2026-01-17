@@ -12,6 +12,7 @@ import DeliveryView from './components/DeliveryView';
 import ReportsView from './components/ReportsView';
 import Login from './components/Login';
 import AdminView from './components/AdminView';
+import HistoryView from './components/HistoryView';
 import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice } from './types';
 import { supabase, isSupabaseConfigured, fetchAllRecords } from './lib/supabase';
 
@@ -606,6 +607,15 @@ const App: React.FC = () => {
               />
             } />
           )}
+
+          <Route path="/history" element={
+            <HistoryView
+              transactions={transactions}
+              cylinders={cylinders}
+              members={members}
+              stations={refillStations}
+            />
+          } />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
