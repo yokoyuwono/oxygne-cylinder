@@ -14,3 +14,37 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 // Helper to check if we are running with real credentials. 
 // We check if the keys are present (either from env or hardcoded) and valid.
 export const isSupabaseConfigured = !!supabaseUrl && !!supabaseKey && supabaseUrl !== 'https://placeholder.supabase.co';
+
+/**
+ * Helper to fetch ALL records from a table, bypassing the default 1000 row limit
+ * by automatically paginating through all available records.
+ */
+export async function fetchAllRecords<T>(tableName: string, select = '*'): Promise<T[]> {
+    let allData: T[] = [];
+    let from = 0;
+    const step = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+        const { data, error } = await supabase
+            .from(tableName)
+            .select(select)
+            .range(from, from + step - 1)
+            .order('id' as any, { ascending: true });
+
+        if (error) {
+            console.error(`Error fetching from ${tableName}:`, error);
+            throw error;
+        }
+
+        if (data && data.length > 0) {
+            allData = allData.concat(data as any[]);
+            from += step;
+            if (data.length < step) hasMore = false;
+        } else {
+            hasMore = false;
+        }
+    }
+
+    return allData;
+}
