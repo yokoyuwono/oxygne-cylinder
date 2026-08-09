@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
-import CylinderList from './components/CylinderList';
+import InventoryView from './components/InventoryView';
 import MembersView from './components/MembersView';
 import ChatBot from './components/ChatBot';
 import RentalForm from './components/RentalForm';
@@ -536,13 +536,15 @@ const App: React.FC = () => {
             />
           } />
           <Route path="/inventory" element={
-            <CylinderList
+            <InventoryView
               cylinders={cylinders}
               transactions={transactions}
+              regulators={regulators}
               onAdd={handleAddCylinder}
               onBulkAdd={handleBulkAddCylinder}
               onUpdate={handleUpdateCylinder}
               onDelete={handleDeleteCylinder}
+              onRefresh={fetchData}
             />
           } />
           <Route path="/rental" element={
