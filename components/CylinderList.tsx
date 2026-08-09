@@ -106,6 +106,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
       case CylinderStatus.EmptyRefill: return 'bg-orange-100 text-orange-800';
       case CylinderStatus.Refilling: return 'bg-yellow-100 text-yellow-800';
       case CylinderStatus.Damaged: return 'bg-red-100 text-red-800';
+      case CylinderStatus.Unknown: return 'bg-slate-200 text-slate-700';
       default: return 'bg-gray-100 text-gray-800';
     }
   };

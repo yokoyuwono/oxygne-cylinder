@@ -28,6 +28,10 @@ export enum CylinderStatus {
   Refilling = 'Refilling',
   Damaged = 'Damaged',
   Delivery = 'Delivery',
+  // Tabung yang posisinya tidak diketahui -- warisan pencatatan yang tidak
+  // dijalankan. Bukan bagian dari armada yang bisa disewakan, jadi dikecualikan
+  // dari perhitungan utilisasi dan stok di Dashboard.
+  Unknown = 'Tidak Diketahui',
 }
 
 export enum CylinderSize {

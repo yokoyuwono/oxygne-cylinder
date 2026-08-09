@@ -23,7 +23,15 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
     const needRefill = cylinders.filter(c => c.status === CylinderStatus.EmptyRefill).length;
     const refilling = cylinders.filter(c => c.status === CylinderStatus.Refilling).length;
     const delivery = cylinders.filter(c => c.status === CylinderStatus.Delivery).length;
-    const utilizationRate = totalCylinders > 0 ? Math.round((rentedCylinders / totalCylinders) * 100) : 0;
+
+    // Tabung yang hilang atau belum pernah diberi status bukan kapasitas yang bisa
+    // disewakan, jadi tidak boleh jadi penyebut utilisasi -- kalau ikut dihitung,
+    // angkanya tertekan jauh di bawah kenyataan.
+    const untrackedCylinders = cylinders.filter(
+        c => !c.status || c.status === CylinderStatus.Unknown
+    ).length;
+    const trackedCylinders = totalCylinders - untrackedCylinders;
+    const utilizationRate = trackedCylinders > 0 ? Math.round((rentedCylinders / trackedCylinders) * 100) : 0;
 
     // -- Overdue / Long Term Logic --
     const overdueData = useMemo(() => {
@@ -88,6 +96,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
         { name: 'Refilling', value: refilling },
         { name: 'Delivery', value: delivery },
         { name: 'Damaged', value: cylinders.filter(c => c.status === CylinderStatus.Damaged).length },
+        { name: 'Tidak Diketahui', value: cylinders.filter(c => c.status === CylinderStatus.Unknown).length },
     ].filter(d => d.value > 0);
 
     // -- Recent Activity Logic --
@@ -145,7 +154,12 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
         });
 
     // -- Low Stock Check --
+    // Hanya peringatkan gas yang memang ada di armada. Enum GasType punya 18+ nilai
+    // sementara toko cuma memegang 4, jadi tanpa saringan ini alert-nya menyebut
+    // setiap gas yang tidak pernah dimiliki dan jadi tidak ada gunanya.
     const lowStockGases = Object.values(GasType).filter(gas => {
+        const total = cylinders.filter(c => c.gasType === gas).length;
+        if (total === 0) return false;
         const avail = cylinders.filter(c => c.gasType === gas && c.status === CylinderStatus.Available).length;
         return avail < 2; // Threshold
     });
@@ -212,8 +226,11 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                         <p className="text-sm text-gray-500 font-medium">Utilization Rate</p>
                         <div className="flex items-baseline gap-2">
                             <p className="text-2xl font-bold text-gray-800">{utilizationRate}%</p>
-                            <span className="text-xs text-gray-400">rented</span>
+                            <span className="text-xs text-gray-400">{rentedCylinders} / {trackedCylinders} tracked</span>
                         </div>
+                        {untrackedCylinders > 0 && (
+                            <p className="text-[11px] text-gray-400 mt-0.5">{untrackedCylinders} tabung belum terlacak</p>
+                        )}
                     </div>
                 </div>
 
