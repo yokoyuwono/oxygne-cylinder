@@ -13,7 +13,8 @@ import ReportsView from './components/ReportsView';
 import Login from './components/Login';
 import AdminView from './components/AdminView';
 import HistoryView from './components/HistoryView';
-import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice } from './types';
+import MasterDataView from './components/MasterDataView';
+import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff, Regulator } from './types';
 import { supabase, isSupabaseConfigured, fetchAllRecords } from './lib/supabase';
 
 const App: React.FC = () => {
@@ -57,6 +58,8 @@ const App: React.FC = () => {
   const [refillStations, setRefillStations] = useState<RefillStation[]>([]);
   const [refillPrices, setRefillPrices] = useState<RefillPrice[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]); // For Admin View
+  const [tariffs, setTariffs] = useState<RentalTariff[]>([]);
+  const [regulators, setRegulators] = useState<Regulator[]>([]);
 
   // -- 1. FETCH INITIAL DATA --
   const fetchData = async () => {
@@ -70,7 +73,9 @@ const App: React.FC = () => {
         gpData,
         rsData,
         rpData,
-        prData
+        prData,
+        rtData,
+        rgData
       ] = await Promise.all([
         fetchAllRecords<Cylinder>('cylinders'),
         fetchAllRecords<Member>('members'),
@@ -79,7 +84,9 @@ const App: React.FC = () => {
         fetchAllRecords<GasPrice>('refill_prices'),
         fetchAllRecords<RefillStation>('refill_stations'),
         fetchAllRecords<RefillPrice>('refill_prices'),
-        fetchAllRecords<AppUser>('profiles')
+        fetchAllRecords<AppUser>('profiles'),
+        fetchAllRecords<RentalTariff>('rental_tariffs'),
+        fetchAllRecords<Regulator>('regulators')
       ]);
 
       if (cylData) setCylinders(cylData);
@@ -90,6 +97,8 @@ const App: React.FC = () => {
       if (rsData) setRefillStations(rsData);
       if (rpData) setRefillPrices(rpData);
       if (prData) setUsers(prData);
+      if (rtData) setTariffs(rtData);
+      if (rgData) setRegulators(rgData);
 
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -608,6 +617,12 @@ const App: React.FC = () => {
                 onUpdateUser={handleUpdateUser}
                 onDeleteUser={handleDeleteUser}
               />
+            } />
+          )}
+
+          {currentUser.role === UserRole.Admin && (
+            <Route path="/master-data" element={
+              <MasterDataView tariffs={tariffs} onRefresh={fetchData} />
             } />
           )}
 

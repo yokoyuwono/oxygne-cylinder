@@ -116,6 +116,13 @@ const Layout: React.FC<LayoutProps> = ({ children, currentUser, onLogout }) => {
           </NavLink>
 
           {currentUser?.role === UserRole.Admin && (
+            <NavLink to="/master-data" className={navLinkClass}>
+              <span className="material-icons">tune</span>
+              Master Data
+            </NavLink>
+          )}
+
+          {currentUser?.role === UserRole.Admin && (
             <NavLink to="/admin" className={navLinkClass}>
               <span className="material-icons">admin_panel_settings</span>
               Pengguna
