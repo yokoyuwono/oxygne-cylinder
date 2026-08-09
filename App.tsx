@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
@@ -25,19 +25,19 @@ const App: React.FC = () => {
           <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
             <span className="material-icons text-3xl">settings_alert</span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">Configuration Required</h1>
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">Konfigurasi Diperlukan</h1>
           <p className="text-gray-500 mb-6">
-            The application cannot connect to Supabase. Please set up your environment variables to continue.
+            Aplikasi tidak bisa terhubung ke Supabase. Atur variabel lingkungan terlebih dahulu untuk melanjutkan.
           </p>
 
           <div className="bg-slate-900 rounded-lg p-4 text-left overflow-x-auto mb-6">
-            <p className="text-slate-400 text-xs uppercase font-bold mb-2">.env / Environment Variables</p>
+            <p className="text-slate-400 text-xs uppercase font-bold mb-2">.env / Variabel Lingkungan</p>
             <code className="text-green-400 text-sm font-mono block mb-1">VITE_SUPABASE_URL=your_project_url</code>
             <code className="text-green-400 text-sm font-mono block">VITE_SUPABASE_ANON_KEY=your_anon_key</code>
           </div>
 
           <p className="text-sm text-gray-400">
-            If you are running this locally, create a <span className="font-mono bg-gray-100 px-1 rounded">.env</span> file in the project root.
+            Kalau menjalankan secara lokal, buat berkas <span className="font-mono bg-gray-100 px-1 rounded">.env</span> di folder utama proyek.
           </p>
         </div>
       </div>
@@ -165,7 +165,7 @@ const App: React.FC = () => {
   // -- User CRUD Handlers (Admin Only) --
   const handleAddUser = async (user: AppUser) => {
     // In real app: Call Cloud Function to create Supabase Auth User
-    alert("Please use Supabase Dashboard to create new Auth Users.");
+    alert("Gunakan Dashboard Supabase untuk membuat akun pengguna baru.");
   };
   const handleUpdateUser = async (user: AppUser) => {
     const { error } = await supabase.from('profiles').update({ role: user.role, name: user.name }).eq('id', user.id);
@@ -503,7 +503,7 @@ const App: React.FC = () => {
       <div className="h-screen w-full flex items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-gray-500 font-medium">Connecting to Database...</p>
+          <p className="text-gray-500 font-medium">Menghubungkan ke database...</p>
         </div>
       </div>
     );

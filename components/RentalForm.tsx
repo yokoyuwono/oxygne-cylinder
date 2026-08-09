@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect, useRef } from 'react';
 import { Cylinder, CylinderStatus, Member, MemberPrice, Transaction, GasPrice } from '../types';
 import { supabase } from '../lib/supabase';
@@ -250,7 +250,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
             }
         } catch (err) {
             console.error(err);
-            setError("Error checking cylinder status.");
+            setError("Gagal memeriksa status tabung.");
         } finally {
             setIsSearching(false);
         }
@@ -330,8 +330,8 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                     <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6">
                         <span className="material-icons text-3xl">point_of_sale</span>
                     </div>
-                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">New Transaction</h1>
-                    <p className="text-gray-500 mb-8 text-sm md:text-base">Select a customer to begin renting or processing returns.</p>
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">Transaksi Baru</h1>
+                    <p className="text-gray-500 mb-8 text-sm md:text-base">Pilih pelanggan untuk mulai menyewakan atau memproses pengembalian.</p>
 
                     <div className="flex justify-center mb-6">
                         <div className="bg-gray-100 p-1.5 rounded-xl flex gap-1">
@@ -340,14 +340,14 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                 className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${transactionSource === 'TOKO' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
                             >
                                 <span className="material-icons text-lg">store</span>
-                                Store (Toko)
+                                Toko
                             </button>
                             <button
                                 onClick={() => setTransactionSource('DELIVERY')}
                                 className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${transactionSource === 'DELIVERY' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
                             >
                                 <span className="material-icons text-lg">local_shipping</span>
-                                Delivery
+                                Pengiriman
                             </button>
                         </div>
                     </div>
@@ -364,7 +364,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                             onFocus={() => setShowMemberMenu(true)}
                             onBlur={() => setTimeout(() => setShowMemberMenu(false), 200)}
                             onKeyDown={handleMemberKeyDown}
-                            placeholder="Search member..."
+                            placeholder="Cari pelanggan..."
                             className="w-full border-2 border-indigo-100 hover:border-indigo-300 focus:border-indigo-600 rounded-xl pl-12 pr-4 py-4 text-base md:text-lg shadow-sm outline-none transition-all"
                             autoComplete="off"
                             autoFocus
@@ -399,7 +399,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         )}
                         {showMemberMenu && memberSearchResults.length === 0 && !isMemberSearching && debouncedMemberQuery && (
                             <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-gray-100 rounded-xl shadow-lg p-4 text-center z-30">
-                                <p className="text-gray-500">No members found.</p>
+                                <p className="text-gray-500">Pelanggan tidak ditemukan.</p>
                             </div>
                         )}
                     </div>
@@ -494,7 +494,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                     disabled={isSearching}
                                     className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white px-4 md:px-8 rounded-xl font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95 text-sm md:text-base"
                                 >
-                                    ADD
+                                    TAMBAH
                                 </button>
                             </div>
 
@@ -514,7 +514,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                                 </div>
                                                 <div>
                                                     <p className="font-bold text-gray-800 font-mono">{cyl.serialCode}</p>
-                                                    <p className="text-xs text-gray-500">{cyl.gasType} • {cyl.size}</p>
+                                                    <p className="text-xs text-gray-500">{cyl.gasType} â€¢ {cyl.size}</p>
                                                 </div>
                                             </div>
                                             <span className={`text-xs font-bold px-2 py-1 rounded ${cyl.status === 'Delivery' ? 'bg-cyan-100 text-cyan-700' : 'bg-green-100 text-green-700'}`}>{cyl.status}</span>
@@ -554,7 +554,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                             {cart.length === 0 ? (
                                 <div className="text-center p-8 text-gray-400 bg-gray-50 rounded-xl border-dashed border-2 border-gray-200">
                                     <span className="material-icons text-4xl mb-2">shopping_cart</span>
-                                    <p className="text-sm">No items scanned yet.</p>
+                                    <p className="text-sm">Belum ada item yang dipindai.</p>
                                 </div>
                             ) : (
                                 cart.map(item => {
@@ -567,7 +567,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                                 </button>
                                                 <div>
                                                     <p className="font-bold text-gray-800 font-mono text-sm">{item.serialCode}</p>
-                                                    <p className="text-xs text-gray-500">{item.gasType} • {item.size}</p>
+                                                    <p className="text-xs text-gray-500">{item.gasType} â€¢ {item.size}</p>
                                                 </div>
                                             </div>
                                             <div className="text-right">
@@ -587,7 +587,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                     <div className="p-3 md:p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
                                         <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm md:text-base">
                                             <span className="material-icons text-orange-500">assignment_return</span>
-                                            Available for Return
+                                            Bisa Dikembalikan
                                         </h3>
                                         <span className="text-xs font-medium text-gray-500 bg-white px-2 py-1 rounded border border-gray-200">
                                             {memberHeldCylinders.length} held
@@ -627,7 +627,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                 </div>
                             ) : (
                                 <div className="p-8 text-center text-gray-400 bg-gray-50 rounded-xl border-dashed border-2 border-gray-200">
-                                    <p className="text-sm">Customer has no items to return.</p>
+                                    <p className="text-sm">Pelanggan tidak punya tabung untuk dikembalikan.</p>
                                 </div>
                             )}
                         </div>
@@ -637,8 +637,8 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                 {/* RIGHT COLUMN: Receipt / Summary (Hidden on Mobile) */}
                 <div className="hidden lg:flex w-[400px] bg-white rounded-xl shadow-lg border border-gray-200 flex-col shrink-0 overflow-hidden h-full">
                     <div className="p-5 border-b border-dashed border-gray-300 bg-gray-50">
-                        <h2 className="text-lg font-bold text-gray-900 tracking-tight">Transaction Receipt</h2>
-                        <p className="text-xs text-gray-500 mt-1">{new Date().toLocaleString()}</p>
+                        <h2 className="text-lg font-bold text-gray-900 tracking-tight">Struk Transaksi</h2>
+                        <p className="text-xs text-gray-500 mt-1">{new Date().toLocaleString('id-ID')}</p>
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -649,7 +649,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                 Outgoing Rentals ({cart.length})
                             </h3>
                             {cart.length === 0 ? (
-                                <p className="text-sm text-gray-400 italic pl-4">No items scanned.</p>
+                                <p className="text-sm text-gray-400 italic pl-4">Belum ada item yang dipindai.</p>
                             ) : (
                                 <div className="space-y-2">
                                     {cart.map(item => {
@@ -662,12 +662,12 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                                     </button>
                                                     <div>
                                                         <p className="font-bold text-gray-800 font-mono text-sm">{item.serialCode}</p>
-                                                        <p className="text-xs text-gray-500">{item.gasType} • {item.size}</p>
+                                                        <p className="text-xs text-gray-500">{item.gasType} â€¢ {item.size}</p>
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
                                                     <p className="font-semibold text-gray-800 text-sm">{formatIDR(price)}</p>
-                                                    {isCustom && <p className="text-[10px] text-green-600 font-medium">Special Rate</p>}
+                                                    {isCustom && <p className="text-[10px] text-green-600 font-medium">Tarif Khusus</p>}
                                                 </div>
                                             </div>
                                         );
@@ -687,7 +687,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                     {memberHeldCylinders.filter(c => returnsList.includes(c.id)).map(item => (
                                         <div key={item.id} className="flex justify-between items-center text-sm pl-4">
                                             <span className="font-mono text-gray-600">{item.serialCode}</span>
-                                            <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded">RETURN</span>
+                                            <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded">KEMBALI</span>
                                         </div>
                                     ))}
                                 </div>
@@ -698,11 +698,11 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                     {/* DESKTOP TOTALS */}
                     <div className="bg-gray-900 text-white p-6">
                         <div className="flex justify-between items-center mb-2">
-                            <span className="text-gray-400 text-sm">Subtotal Items</span>
+                            <span className="text-gray-400 text-sm">Subtotal Item</span>
                             <span className="font-mono">{cart.length + returnsList.length}</span>
                         </div>
                         <div className="flex justify-between items-end mb-6">
-                            <span className="text-lg font-bold">Total Due</span>
+                            <span className="text-lg font-bold">Total Tagihan</span>
                             <span className="text-3xl font-bold text-green-400">{formatIDR(totalCost)}</span>
                         </div>
                         <button
@@ -710,7 +710,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                             disabled={cart.length === 0 && returnsList.length === 0}
                             className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white rounded-xl font-bold text-lg shadow-lg transition-all flex justify-center items-center gap-2"
                         >
-                            <span>Confirm & Pay</span>
+                            <span>Konfirmasi &amp; Bayar</span>
                             <span className="material-icons text-sm">arrow_forward</span>
                         </button>
                     </div>
@@ -720,16 +720,16 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                 <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-40 pb-20 md:pb-4">
                     <div className="flex items-center justify-between gap-4">
                         <div>
-                            <p className="text-xs text-gray-500 font-bold uppercase">Total Due</p>
+                            <p className="text-xs text-gray-500 font-bold uppercase">Total Tagihan</p>
                             <p className="text-xl font-bold text-indigo-700">{formatIDR(totalCost)}</p>
-                            <p className="text-xs text-gray-400">{cart.length} Rent • {returnsList.length} Return</p>
+                            <p className="text-xs text-gray-400">{cart.length} Rent â€¢ {returnsList.length} Return</p>
                         </div>
                         <button
                             onClick={handleCheckoutClick}
                             disabled={cart.length === 0 && returnsList.length === 0}
                             className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:text-gray-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95"
                         >
-                            Confirm
+                            Konfirmasi
                         </button>
                     </div>
                 </div>
@@ -743,7 +743,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         <div className="bg-indigo-600 px-6 py-4 flex justify-between items-center text-white">
                             <h3 className="font-bold flex items-center gap-2 text-lg">
                                 <span className="material-icons">receipt_long</span>
-                                Confirm Transaction
+                                Konfirmasi Transaksi
                             </h3>
                             <button onClick={() => setIsConfirmOpen(false)} className="text-indigo-200 hover:text-white transition-colors">
                                 <span className="material-icons">close</span>
@@ -754,7 +754,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         <div className="p-6">
                             {/* Customer Info */}
                             <div className="mb-6 pb-4 border-b border-gray-100 text-center">
-                                <p className="text-gray-400 text-xs uppercase tracking-widest font-bold mb-1">Customer</p>
+                                <p className="text-gray-400 text-xs uppercase tracking-widest font-bold mb-1">Pelanggan</p>
                                 <h4 className="text-xl font-bold text-gray-800">{selectedMember.companyName}</h4>
                                 <p className="text-sm text-gray-500">{selectedMember.name}</p>
                             </div>
@@ -790,7 +790,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                             {memberHeldCylinders.filter(c => returnsList.includes(c.id)).map(item => (
                                                 <li key={item.id} className="flex justify-between text-sm">
                                                     <span className="text-gray-600 font-mono">{item.serialCode}</span>
-                                                    <span className="text-xs bg-orange-100 text-orange-700 px-1.5 rounded">RETURN</span>
+                                                    <span className="text-xs bg-orange-100 text-orange-700 px-1.5 rounded">KEMBALI</span>
                                                 </li>
                                             ))}
                                         </ul>
@@ -801,11 +801,11 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                             {/* Totals */}
                             <div className="bg-gray-50 rounded-lg p-4 border border-gray-100">
                                 <div className="flex justify-between text-sm mb-1">
-                                    <span className="text-gray-500">Rental Subtotal</span>
+                                    <span className="text-gray-500">Subtotal Sewa</span>
                                     <span className="font-semibold text-gray-700">{formatIDR(totalCost)}</span>
                                 </div>
                                 <div className="flex justify-between items-end border-t border-gray-200 pt-2 mt-2">
-                                    <span className="font-bold text-gray-800">Net Total Due</span>
+                                    <span className="font-bold text-gray-800">Total Bersih</span>
                                     <span className="text-2xl font-bold text-indigo-600">{formatIDR(totalCost)}</span>
                                 </div>
                             </div>
@@ -817,7 +817,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                 onClick={() => confirmTransaction(false)}
                                 className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-lg shadow-indigo-200 transition-colors flex items-center justify-center gap-2"
                             >
-                                <span>Pay Now</span>
+                                <span>Bayar Sekarang</span>
                                 <span className="material-icons text-sm">payments</span>
                             </button>
                             {totalCost > 0 && (
@@ -825,7 +825,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                     onClick={() => confirmTransaction(true)}
                                     className="w-full py-3 bg-white border-2 border-orange-500 text-orange-600 hover:bg-orange-50 rounded-lg font-bold transition-colors flex items-center justify-center gap-2"
                                 >
-                                    <span>Pay Later (Debt)</span>
+                                    <span>Bayar Nanti (Utang)</span>
                                     <span className="material-icons text-sm">money_off</span>
                                 </button>
                             )}

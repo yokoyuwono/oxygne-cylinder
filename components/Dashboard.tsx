@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+﻿import React, { useState, useMemo } from 'react';
 import { Cylinder, CylinderStatus, GasType, Transaction, Member, RefillStation, MemberStatus } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { useNavigate } from 'react-router-dom';
@@ -90,12 +90,12 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
     });
 
     const pieData = [
-        { name: 'Available', value: availableCylinders },
-        { name: 'Rented', value: rentedCylinders },
-        { name: 'Empty', value: needRefill },
-        { name: 'Refilling', value: refilling },
-        { name: 'Delivery', value: delivery },
-        { name: 'Damaged', value: cylinders.filter(c => c.status === CylinderStatus.Damaged).length },
+        { name: 'Tersedia', value: availableCylinders },
+        { name: 'Disewa', value: rentedCylinders },
+        { name: 'Kosong', value: needRefill },
+        { name: 'Sedang Diisi', value: refilling },
+        { name: 'Pengiriman', value: delivery },
+        { name: 'Rusak', value: cylinders.filter(c => c.status === CylinderStatus.Damaged).length },
         { name: 'Tidak Diketahui', value: cylinders.filter(c => c.status === CylinderStatus.Unknown).length },
     ].filter(d => d.value > 0);
 
@@ -170,8 +170,8 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
             {/* Header & Alerts */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
-                    <p className="text-sm text-gray-500">{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                    <h1 className="text-2xl font-bold text-gray-800">Beranda</h1>
+                    <p className="text-sm text-gray-500">{new Date().toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
                 </div>
             </div>
 
@@ -184,8 +184,8 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                                 <span className="material-icons text-red-600">warning</span>
                             </div>
                             <div>
-                                <p className="font-bold text-sm">Low Stock Alert</p>
-                                <p className="text-xs">Critical levels for: {lowStockGases.map(g => g.split(' ')[0]).join(', ')}</p>
+                                <p className="font-bold text-sm">Stok Menipis</p>
+                                <p className="text-xs">Stok kritis untuk: {lowStockGases.map(g => g.split(' ')[0]).join(', ')}</p>
                             </div>
                         </div>
                     )}
@@ -196,8 +196,8 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                                     <span className="material-icons text-green-600">savings</span>
                                 </div>
                                 <div>
-                                    <p className="font-bold text-sm">Refunds Ready</p>
-                                    <p className="text-xs">{membersReadyForRefund.length} members completed waiting period.</p>
+                                    <p className="font-bold text-sm">Deposit Siap Dikembalikan</p>
+                                    <p className="text-xs">{membersReadyForRefund.length} pelanggan telah melewati masa tunggu.</p>
                                 </div>
                             </div>
                             <span className="material-icons text-green-400">chevron_right</span>
@@ -213,7 +213,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                         <span className="material-icons text-2xl">inventory_2</span>
                     </div>
                     <div>
-                        <p className="text-sm text-gray-500 font-medium">Total Assets</p>
+                        <p className="text-sm text-gray-500 font-medium">Total Tabung</p>
                         <p className="text-2xl font-bold text-gray-800">{totalCylinders}</p>
                     </div>
                 </div>
@@ -223,10 +223,10 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                         <span className="material-icons text-2xl">pie_chart</span>
                     </div>
                     <div>
-                        <p className="text-sm text-gray-500 font-medium">Utilization Rate</p>
+                        <p className="text-sm text-gray-500 font-medium">Tingkat Pemakaian</p>
                         <div className="flex items-baseline gap-2">
                             <p className="text-2xl font-bold text-gray-800">{utilizationRate}%</p>
-                            <span className="text-xs text-gray-400">{rentedCylinders} / {trackedCylinders} tracked</span>
+                            <span className="text-xs text-gray-400">{rentedCylinders} / {trackedCylinders} terlacak</span>
                         </div>
                         {untrackedCylinders > 0 && (
                             <p className="text-[11px] text-gray-400 mt-0.5">{untrackedCylinders} tabung belum terlacak</p>
@@ -239,7 +239,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                         <span className="material-icons text-2xl">check_circle</span>
                     </div>
                     <div>
-                        <p className="text-sm text-gray-500 font-medium">Available Now</p>
+                        <p className="text-sm text-gray-500 font-medium">Tersedia Sekarang</p>
                         <p className="text-2xl font-bold text-gray-800">{availableCylinders}</p>
                     </div>
                 </div>
@@ -249,7 +249,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                         <span className="material-icons text-2xl">local_gas_station</span>
                     </div>
                     <div>
-                        <p className="text-sm text-gray-500 font-medium">Needs Refill</p>
+                        <p className="text-sm text-gray-500 font-medium">Perlu Isi Ulang</p>
                         <p className="text-2xl font-bold text-gray-800">{needRefill}</p>
                     </div>
                 </div>
@@ -260,7 +260,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                         <span className="material-icons text-2xl">watch_later</span>
                     </div>
                     <div>
-                        <p className="text-sm text-gray-500 font-medium">Long Term Rent</p>
+                        <p className="text-sm text-gray-500 font-medium">Sewa Jangka Panjang</p>
                         <div className="flex items-baseline gap-2">
                             <p className="text-2xl font-bold text-gray-800">{longTermRentalsCount}</p>
                             <span className="text-xs text-purple-400 font-medium">{'>'} 2 mo</span>
@@ -280,26 +280,26 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                         <div className="p-6 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                             <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                                 <span className="material-icons text-red-500 text-sm">history_toggle_off</span>
-                                Long Duration Rentals
+                                Sewa Berdurasi Panjang
                             </h3>
                             <div className="flex bg-gray-100 p-1 rounded-lg">
                                 <button
                                     onClick={() => setOverdueFilter('3m')}
                                     className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${overdueFilter === '3m' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                                 >
-                                    {'>'} 3 Months
+                                    {'>'} 3 Bulan
                                 </button>
                                 <button
                                     onClick={() => setOverdueFilter('6m')}
                                     className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${overdueFilter === '6m' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                                 >
-                                    {'>'} 6 Months
+                                    {'>'} 6 Bulan
                                 </button>
                                 <button
                                     onClick={() => setOverdueFilter('12m')}
                                     className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${overdueFilter === '12m' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                                 >
-                                    {'>'} 1 Year
+                                    {'>'} 1 Tahun
                                 </button>
                             </div>
                         </div>
@@ -309,10 +309,10 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                                 <table className="w-full text-left text-sm">
                                     <thead className="bg-gray-50 text-gray-500 font-medium">
                                         <tr>
-                                            <th className="px-6 py-3">Asset</th>
-                                            <th className="px-6 py-3">Customer</th>
-                                            <th className="px-6 py-3">Rented Date</th>
-                                            <th className="px-6 py-3 text-right">Duration</th>
+                                            <th className="px-6 py-3">Tabung</th>
+                                            <th className="px-6 py-3">Pelanggan</th>
+                                            <th className="px-6 py-3">Tanggal Sewa</th>
+                                            <th className="px-6 py-3 text-right">Durasi</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
@@ -326,14 +326,14 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                                                     {item.member?.companyName || 'Unknown'}
                                                 </td>
                                                 <td className="px-6 py-3 text-gray-500 text-xs">
-                                                    {new Date(item.rentDate).toLocaleDateString()}
+                                                    {new Date(item.rentDate).toLocaleDateString('id-ID')}
                                                 </td>
                                                 <td className="px-6 py-3 text-right">
                                                     <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${item.days > 365 ? 'bg-red-100 text-red-700' :
                                                             item.days > 180 ? 'bg-orange-100 text-orange-700' :
                                                                 'bg-yellow-100 text-yellow-800'
                                                         }`}>
-                                                        {item.days} days
+                                                        {item.days} hari
                                                     </span>
                                                 </td>
                                             </tr>
@@ -343,7 +343,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                                 {filteredOverdue.length > 5 && (
                                     <div className="p-2 text-center border-t border-gray-100 bg-gray-50">
                                         <button onClick={() => navigate('/inventory')} className="text-xs text-indigo-600 font-bold hover:underline">
-                                            View all {filteredOverdue.length} overdue items
+                                            Lihat semua {filteredOverdue.length} tabung terlambat
                                         </button>
                                     </div>
                                 )}
@@ -351,7 +351,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                         ) : (
                             <div className="p-8 text-center text-gray-400 text-sm bg-white">
                                 <span className="material-icons text-3xl mb-2 text-green-200">check_circle</span>
-                                <p>No cylinders found matching this duration.</p>
+                                <p>Tidak ada tabung yang cocok dengan durasi ini.</p>
                             </div>
                         )}
                     </div>
@@ -359,7 +359,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
                             <span className="material-icons text-gray-400 text-sm">bar_chart</span>
-                            Inventory Levels
+                            Tingkat Persediaan
                         </h3>
                         <div className="h-64">
                             <ResponsiveContainer width="100%" height="100%">
@@ -372,8 +372,8 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                                         cursor={{ fill: '#f8fafc' }}
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                                    <Bar dataKey="Total" fill="#e2e8f0" radius={[4, 4, 0, 0]} barSize={30} />
-                                    <Bar dataKey="Available" fill="#22c55e" radius={[4, 4, 0, 0]} barSize={30} />
+                                    <Bar dataKey="Total" name="Total" fill="#e2e8f0" radius={[4, 4, 0, 0]} barSize={30} />
+                                    <Bar dataKey="Available" name="Tersedia" fill="#22c55e" radius={[4, 4, 0, 0]} barSize={30} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
@@ -384,9 +384,9 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                                 <span className="material-icons text-gray-400 text-sm">history</span>
-                                Recent Activity
+                                Aktivitas Terbaru
                             </h3>
-                            <button onClick={() => navigate('/history')} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">View All</button>
+                            <button onClick={() => navigate('/history')} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">Lihat Semua</button>
                         </div>
                         <div className="space-y-4">
                             {recentTransactions.length > 0 ? (
@@ -398,13 +398,13 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                                         <div>
                                             <p className="text-sm font-medium text-gray-800">{tx.description}</p>
                                             <p className="text-xs text-gray-400 mt-1">
-                                                {new Date(tx.date).toLocaleDateString()} • {new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                {new Date(tx.date).toLocaleDateString('id-ID')} â€¢ {new Date(tx.date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
                                             </p>
                                         </div>
                                     </div>
                                 ))
                             ) : (
-                                <div className="text-center text-gray-400 py-6 text-sm">No recent activity</div>
+                                <div className="text-center text-gray-400 py-6 text-sm">Belum ada aktivitas</div>
                             )}
                         </div>
                     </div>
@@ -415,42 +415,42 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
 
                     {/* Quick Actions Panel */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Quick Actions</h3>
+                        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Aksi Cepat</h3>
                         <div className="grid grid-cols-2 gap-3">
                             <button
                                 onClick={() => navigate('/rental')}
                                 className="flex flex-col items-center justify-center p-4 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors border border-blue-100"
                             >
                                 <span className="material-icons mb-2">shopping_cart</span>
-                                <span className="text-sm font-semibold">Rent Out</span>
+                                <span className="text-sm font-semibold">Sewa Keluar</span>
                             </button>
                             <button
                                 onClick={() => navigate('/rental')}
                                 className="flex flex-col items-center justify-center p-4 rounded-xl bg-green-50 text-green-700 hover:bg-green-100 transition-colors border border-green-100"
                             >
                                 <span className="material-icons mb-2">assignment_return</span>
-                                <span className="text-sm font-semibold">Return</span>
+                                <span className="text-sm font-semibold">Pengembalian</span>
                             </button>
                             <button
                                 onClick={() => navigate('/delivery')}
                                 className="flex flex-col items-center justify-center p-4 rounded-xl bg-orange-50 text-orange-700 hover:bg-orange-100 transition-colors border border-orange-100"
                             >
                                 <span className="material-icons mb-2">local_shipping</span>
-                                <span className="text-sm font-semibold">Delivery</span>
+                                <span className="text-sm font-semibold">Pengiriman</span>
                             </button>
                             <button
                                 onClick={() => navigate('/inventory')}
                                 className="flex flex-col items-center justify-center p-4 rounded-xl bg-gray-50 text-gray-700 hover:bg-gray-100 transition-colors border border-gray-200"
                             >
                                 <span className="material-icons mb-2">add_box</span>
-                                <span className="text-sm font-semibold">Add Stock</span>
+                                <span className="text-sm font-semibold">Tambah Stok</span>
                             </button>
                         </div>
                     </div>
 
                     {/* Pie Chart: Status Distribution */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center">
-                        <h3 className="text-lg font-bold text-gray-800 mb-2 w-full text-left">Asset Status</h3>
+                        <h3 className="text-lg font-bold text-gray-800 mb-2 w-full text-left">Status Tabung</h3>
                         <div className="h-48 w-full">
                             <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>

@@ -1,5 +1,6 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+﻿import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Member, MemberPrice, Transaction, Cylinder, MemberStatus } from '../types';
+import { labelStatusAnggota, labelStatusTabung, labelJenisTransaksi } from '../labels';
 import { supabase } from '../lib/supabase';
 
 interface MembersViewProps {
@@ -217,7 +218,7 @@ const MembersView: React.FC<MembersViewProps> = ({
     };
 
     const handleExitRequest = () => {
-        if (selectedMember && confirm('Are you sure you want to mark this member for exit?')) {
+        if (selectedMember && confirm('Yakin ingin menandai pelanggan ini untuk keluar?')) {
             onRequestExit(selectedMember.id);
             setTimeout(fetchMembers, 500);
         }
@@ -225,7 +226,7 @@ const MembersView: React.FC<MembersViewProps> = ({
 
     const handleRefund = () => {
         if (selectedMember && selectedMember.totalDeposit > 0) {
-            if (confirm(`Refund deposit of ${formatIDR(selectedMember.totalDeposit)}?`)) {
+            if (confirm(`Kembalikan deposit sebesar ${formatIDR(selectedMember.totalDeposit)}?`)) {
                 onProcessRefund(selectedMember.id, selectedMember.totalDeposit);
                 setTimeout(fetchMembers, 500);
             }
@@ -276,7 +277,7 @@ const MembersView: React.FC<MembersViewProps> = ({
             }
         } catch (err) {
             console.error("Error saving price:", err);
-            alert("Failed to save price. Check console.");
+            alert("Gagal menyimpan harga. Periksa console.");
         }
     };
 
@@ -293,7 +294,7 @@ const MembersView: React.FC<MembersViewProps> = ({
             setPriceToDelete(null);
         } catch (err) {
             console.error("Error deleting price:", err);
-            alert("Failed to delete price.");
+            alert("Gagal menghapus harga.");
         }
     };
 
@@ -302,7 +303,7 @@ const MembersView: React.FC<MembersViewProps> = ({
             {/* Left List */}
             <div className="w-full md:w-1/3 flex flex-col gap-4">
                 <div className="flex justify-between items-center">
-                    <h2 className="text-xl font-bold text-gray-800">Members</h2>
+                    <h2 className="text-xl font-bold text-gray-800">Data Pelanggan</h2>
                     <button onClick={handleOpenAdd} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-indigo-700">
                         + Add
                     </button>
@@ -312,7 +313,7 @@ const MembersView: React.FC<MembersViewProps> = ({
                     <span className="material-icons absolute left-3 top-2.5 text-gray-400 text-sm">search</span>
                     <input
                         type="text"
-                        placeholder="Search members..."
+                        placeholder="Cari pelanggan..."
                         className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                         value={searchTerm}
                         onChange={e => setSearchTerm(e.target.value)}
@@ -325,7 +326,7 @@ const MembersView: React.FC<MembersViewProps> = ({
                         {isLoadingMembers ? (
                             <div className="flex flex-col items-center justify-center h-40 text-gray-400">
                                 <div className="w-6 h-6 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-2"></div>
-                                <p className="text-xs">Loading members...</p>
+                                <p className="text-xs">Memuat data pelanggan...</p>
                             </div>
                         ) : pagedMembers.length > 0 ? (
                             pagedMembers.map(m => (
@@ -337,7 +338,7 @@ const MembersView: React.FC<MembersViewProps> = ({
                                     <div className="flex justify-between items-start mb-1">
                                         <h3 className={`font-bold ${selectedMemberId === m.id ? 'text-indigo-700' : 'text-gray-800'}`}>{m.companyName}</h3>
                                         {m.status !== MemberStatus.Active && (
-                                            <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-bold uppercase">{m.status}</span>
+                                            <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-bold uppercase">{labelStatusAnggota(m.status)}</span>
                                         )}
                                     </div>
                                     <p className="text-sm text-gray-600 mb-1">{m.name}</p>
@@ -353,7 +354,7 @@ const MembersView: React.FC<MembersViewProps> = ({
                             ))
                         ) : (
                             <div className="p-8 text-center text-gray-400">
-                                <p>No members found.</p>
+                                <p>Pelanggan tidak ditemukan.</p>
                             </div>
                         )}
                     </div>
@@ -368,7 +369,7 @@ const MembersView: React.FC<MembersViewProps> = ({
                             <span className="material-icons text-sm">chevron_left</span>
                         </button>
                         <span className="text-xs font-medium text-gray-600">
-                            Page {currentPage} of {totalPages || 1}
+                            Halaman {currentPage} dari {totalPages || 1}
                         </span>
                         <button
                             onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
@@ -409,12 +410,12 @@ const MembersView: React.FC<MembersViewProps> = ({
                         {/* Custom Prices Section */}
                         <div id='member-price' className="px-6 py-4 border-b border-gray-100">
                             <div className="flex justify-between items-center mb-3">
-                                <h3 className="font-bold text-gray-800 text-sm uppercase tracking-wider">Custom Gas Prices</h3>
+                                <h3 className="font-bold text-gray-800 text-sm uppercase tracking-wider">Harga Gas Khusus</h3>
                                 <button
                                     onClick={handleOpenAddPrice}
                                     className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-100 font-medium flex items-center gap-1"
                                 >
-                                    <span className="material-icons text-xs">add</span> Add Price
+                                    <span className="material-icons text-xs">add</span> Tambah Harga
                                 </button>
                             </div>
 
@@ -431,14 +432,14 @@ const MembersView: React.FC<MembersViewProps> = ({
                                                 onClick={() => setPriceToDelete(p)}
                                                 className="text-[10px] text-red-400 hover:text-red-600 hover:underline mt-1 opacity-0 group-hover:opacity-100 transition-opacity"
                                             >
-                                                Remove
+                                                Hapus
                                             </button>
                                         </div>
                                     </div>
                                 ))}
                                 {prices.filter(p => p.memberId === selectedMember.id).length === 0 && (
                                     <div className="col-span-full text-center py-4 border-2 border-dashed border-gray-100 rounded-lg">
-                                        <p className="text-xs text-gray-400 italic">No custom prices set. Uses default.</p>
+                                        <p className="text-xs text-gray-400 italic">Belum ada harga khusus. Memakai harga standar.</p>
                                     </div>
                                 )}
                             </div>
@@ -448,7 +449,7 @@ const MembersView: React.FC<MembersViewProps> = ({
                             {/* Holding Card */}
                             <div className="bg-white p-4 rounded-xl border border-blue-100 shadow-sm relative overflow-hidden group">
                                 <div className="absolute top-0 right-0 w-16 h-16 bg-blue-50 rounded-bl-full -mr-6 -mt-6 pointer-events-none"></div>
-                                <p className="text-xs text-gray-500 font-bold uppercase mb-1">Cylinders Held</p>
+                                <p className="text-xs text-gray-500 font-bold uppercase mb-1">Jumlah Tabung</p>
                                 <p className="text-xl font-bold text-gray-800">{memberHoldings.length}</p>
                                 <span className="material-icons absolute bottom-2 right-2 text-blue-100 text-4xl group-hover:text-blue-200 transition-colors pointer-events-none">propane</span>
                             </div>
@@ -456,19 +457,19 @@ const MembersView: React.FC<MembersViewProps> = ({
                             {/* Deposit Card */}
                             <div className="bg-white p-4 rounded-xl border border-green-100 shadow-sm relative overflow-hidden group">
                                 <div className="absolute top-0 right-0 w-16 h-16 bg-green-50 rounded-bl-full -mr-6 -mt-6 pointer-events-none"></div>
-                                <p className="text-xs text-gray-500 font-bold uppercase mb-1">Security Deposit</p>
+                                <p className="text-xs text-gray-500 font-bold uppercase mb-1">Deposit Jaminan</p>
                                 <p className="text-xl font-bold text-gray-800">{formatIDR(selectedMember.totalDeposit)}</p>
                                 <span className="material-icons absolute bottom-2 right-2 text-green-100 text-4xl group-hover:text-green-200 transition-colors pointer-events-none">savings</span>
 
                                 {/* Refund Action */}
                                 {(selectedMember.status === MemberStatus.Pending_Exit || selectedMember.status === MemberStatus.Non_Active) && selectedMember.totalDeposit > 0 && (
                                     <button onClick={handleRefund} className="mt-2 text-xs bg-green-600 text-white px-2 py-1 rounded shadow-sm hover:bg-green-700">
-                                        Process Refund
+                                        Proses Pengembalian
                                     </button>
                                 )}
                                 {selectedMember.status === MemberStatus.Active && (
                                     <button onClick={handleExitRequest} className="mt-2 text-[10px] text-red-500 hover:underline">
-                                        Request Exit
+                                        Ajukan Keluar
                                     </button>
                                 )}
                             </div>
@@ -478,7 +479,7 @@ const MembersView: React.FC<MembersViewProps> = ({
                                 <div className="absolute top-0 right-0 w-16 h-16 bg-red-50 rounded-bl-full -mr-6 -mt-6 pointer-events-none"></div>
 
                                 <div className="relative z-10">
-                                    <p className="text-xs text-gray-500 font-bold uppercase mb-1">Total Debt</p>
+                                    <p className="text-xs text-gray-500 font-bold uppercase mb-1">Total Utang</p>
                                     <p className={`text-xl font-bold truncate ${selectedMember.totalDebt > 0 ? 'text-red-600' : 'text-gray-800'}`}>{formatIDR(selectedMember.totalDebt || 0)}</p>
                                 </div>
 
@@ -490,7 +491,7 @@ const MembersView: React.FC<MembersViewProps> = ({
                                             onClick={openPayDebtModal}
                                             className="w-full text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1.5 rounded-lg shadow-sm transition-colors flex items-center justify-center gap-1 font-semibold"
                                         >
-                                            <span className="material-icons text-xs">payments</span> Pay Debt
+                                            <span className="material-icons text-xs">payments</span> Bayar Utang
                                         </button>
                                     </div>
                                 )}
@@ -501,15 +502,15 @@ const MembersView: React.FC<MembersViewProps> = ({
                         <div className="px-6 pb-6 space-y-6">
                             {/* Holdings List */}
                             <div>
-                                <h3 className="font-bold text-gray-800 mb-3 text-sm uppercase tracking-wider">Current Holdings</h3>
+                                <h3 className="font-bold text-gray-800 mb-3 text-sm uppercase tracking-wider">Tabung Dipegang</h3>
                                 {memberHoldings.length > 0 ? (
                                     <div className="border border-gray-200 rounded-lg overflow-hidden">
                                         <table className="w-full text-sm text-left">
                                             <thead className="bg-gray-50 text-gray-500 font-medium">
                                                 <tr>
-                                                    <th className="px-4 py-2">Serial Code</th>
-                                                    <th className="px-4 py-2">Gas Type</th>
-                                                    <th className="px-4 py-2">Size</th>
+                                                    <th className="px-4 py-2">Kode Seri</th>
+                                                    <th className="px-4 py-2">Jenis Gas</th>
+                                                    <th className="px-4 py-2">Ukuran</th>
                                                     <th className="px-4 py-2">Status</th>
                                                 </tr>
                                             </thead>
@@ -519,14 +520,14 @@ const MembersView: React.FC<MembersViewProps> = ({
                                                         <td className="px-4 py-2 font-mono font-bold text-gray-700">{c.serialCode}</td>
                                                         <td className="px-4 py-2">{c.gasType}</td>
                                                         <td className="px-4 py-2">{c.size}</td>
-                                                        <td className="px-4 py-2"><span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{c.status}</span></td>
+                                                        <td className="px-4 py-2"><span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{labelStatusTabung(c.status)}</span></td>
                                                     </tr>
                                                 ))}
                                             </tbody>
                                         </table>
                                     </div>
                                 ) : (
-                                    <p className="text-sm text-gray-400 italic">No cylinders currently held.</p>
+                                    <p className="text-sm text-gray-400 italic">Tidak ada tabung yang sedang dipegang.</p>
                                 )}
                             </div>
 
@@ -534,7 +535,7 @@ const MembersView: React.FC<MembersViewProps> = ({
                             <div>
                                 <h3 className="font-bold text-gray-800 mb-3 text-sm uppercase tracking-wider flex justify-between items-center">
                                     History
-                                    {isHistoryLoading && <span className="text-xs text-gray-400 font-normal animate-pulse">Loading...</span>}
+                                    {isHistoryLoading && <span className="text-xs text-gray-400 font-normal animate-pulse">Memuat...</span>}
                                 </h3>
 
                                 {/* Dashed Box Style similar to screenshot */}
@@ -559,10 +560,10 @@ const MembersView: React.FC<MembersViewProps> = ({
                                                             </div>
                                                             <div>
                                                                 <p className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                                                                    {t.type.replace('_', ' ')}
+                                                                    {labelJenisTransaksi(t.type)}
                                                                     {cyl && <span className="text-xs font-mono font-normal text-gray-500 bg-gray-100 px-1 rounded">#{cyl.serialCode}</span>}
                                                                 </p>
-                                                                <p className="text-xs text-gray-400">{new Date(t.date).toLocaleDateString()}</p>
+                                                                <p className="text-xs text-gray-400">{new Date(t.date).toLocaleDateString('id-ID')}</p>
                                                             </div>
                                                         </div>
                                                         <div className="text-right">
@@ -583,14 +584,14 @@ const MembersView: React.FC<MembersViewProps> = ({
                                                 )
                                             })
                                         ) : (
-                                            <p className="text-sm text-gray-400 italic p-2">No transactions found.</p>
+                                            <p className="text-sm text-gray-400 italic p-2">Belum ada transaksi.</p>
                                         )}
                                     </div>
 
                                     {/* Pagination */}
                                     {historyTotal > HISTORY_PAGE_SIZE && (
                                         <div className="flex justify-between items-center mt-3 pt-2 border-t border-indigo-100 px-2">
-                                            <span className="text-xs text-gray-500">Page {historyPage} of {historyTotalPages}</span>
+                                            <span className="text-xs text-gray-500">Halaman {historyPage} dari {historyTotalPages}</span>
                                             <div className="flex gap-2">
                                                 <button
                                                     disabled={historyPage === 1 || isHistoryLoading}
@@ -616,7 +617,7 @@ const MembersView: React.FC<MembersViewProps> = ({
                 ) : (
                     <div className="flex flex-col items-center justify-center h-full text-gray-400">
                         <span className="material-icons text-5xl mb-4 text-gray-300">person_search</span>
-                        <p className="text-lg">Select a member to view details</p>
+                        <p className="text-lg">Pilih pelanggan untuk melihat detail</p>
                     </div>
                 )}
             </div>
@@ -633,35 +634,35 @@ const MembersView: React.FC<MembersViewProps> = ({
                         </div>
                         <form onSubmit={handleMemberSubmit} className="p-6 space-y-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Nama Perusahaan</label>
                                 <input type="text" required className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                                     value={currentMember.companyName || ''} onChange={e => setCurrentMember({ ...currentMember, companyName: e.target.value })} />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person Name</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Nama Narahubung</label>
                                 <input type="text" required className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                                     value={currentMember.name || ''} onChange={e => setCurrentMember({ ...currentMember, name: e.target.value })} />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Telepon</label>
                                     <input type="text" required className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                                         value={currentMember.phone || ''} onChange={e => setCurrentMember({ ...currentMember, phone: e.target.value })} />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Initial Deposit</label>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Deposit Awal</label>
                                     <input type="number" disabled={isEditingMember} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-gray-50"
                                         value={currentMember.totalDeposit || 0} onChange={e => setCurrentMember({ ...currentMember, totalDeposit: parseFloat(e.target.value) })} />
                                 </div>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Alamat</label>
                                 <textarea className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" rows={2}
                                     value={currentMember.address || ''} onChange={e => setCurrentMember({ ...currentMember, address: e.target.value })}></textarea>
                             </div>
                             <div className="pt-2 flex justify-end gap-3">
-                                <button type="button" onClick={() => setIsMemberModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Cancel</button>
-                                <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium">Save</button>
+                                <button type="button" onClick={() => setIsMemberModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Batal</button>
+                                <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium">Simpan</button>
                             </div>
                         </form>
                     </div>
@@ -673,16 +674,16 @@ const MembersView: React.FC<MembersViewProps> = ({
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
                     <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-fade-in-up">
                         <div className="bg-red-600 px-6 py-4 flex justify-between items-center text-white">
-                            <h3 className="font-bold flex items-center gap-2"><span className="material-icons">payments</span> Pay Debt</h3>
+                            <h3 className="font-bold flex items-center gap-2"><span className="material-icons">payments</span> Bayar Utang</h3>
                             <button onClick={() => setIsDebtModalOpen(false)} className="text-red-200 hover:text-white"><span className="material-icons">close</span></button>
                         </div>
                         <form onSubmit={handlePayDebtSubmit} className="p-6">
                             <div className="mb-4">
-                                <p className="text-sm text-gray-600 mb-2">Total Outstanding Debt</p>
+                                <p className="text-sm text-gray-600 mb-2">Total Utang Belum Lunas</p>
                                 <p className="text-2xl font-bold text-red-600">{formatIDR(selectedMember?.totalDebt || 0)}</p>
                             </div>
                             <div className="mb-6">
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Amount (IDR)</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Jumlah Pembayaran (Rp)</label>
                                 <input
                                     type="number"
                                     required
@@ -695,8 +696,8 @@ const MembersView: React.FC<MembersViewProps> = ({
                                 />
                             </div>
                             <div className="flex justify-end gap-3">
-                                <button type="button" onClick={() => setIsDebtModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Cancel</button>
-                                <button type="submit" className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium">Confirm Payment</button>
+                                <button type="button" onClick={() => setIsDebtModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Batal</button>
+                                <button type="submit" className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium">Konfirmasi Pembayaran</button>
                             </div>
                         </form>
                     </div>
@@ -708,13 +709,13 @@ const MembersView: React.FC<MembersViewProps> = ({
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
                     <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-fade-in-up">
                         <div className="bg-red-600 px-6 py-4 flex justify-between items-center text-white">
-                            <h3 className="font-bold flex items-center gap-2"><span className="material-icons">warning</span> Delete Member</h3>
+                            <h3 className="font-bold flex items-center gap-2"><span className="material-icons">warning</span> Hapus Pelanggan</h3>
                             <button onClick={() => setMemberToDelete(null)} className="text-red-200 hover:text-white"><span className="material-icons">close</span></button>
                         </div>
                         <div className="p-6 text-center">
-                            <p className="text-gray-700 mb-6">Are you sure you want to delete <strong>{memberToDelete.companyName}</strong>? This cannot be undone.</p>
+                            <p className="text-gray-700 mb-6">Yakin ingin menghapus <strong>{memberToDelete.companyName}</strong>? This cannot be undone.</p>
                             <div className="flex justify-center gap-3">
-                                <button onClick={() => setMemberToDelete(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Cancel</button>
+                                <button onClick={() => setMemberToDelete(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Batal</button>
                                 <button
                                     onClick={() => {
                                         onDeleteMember(memberToDelete.id);
@@ -724,7 +725,7 @@ const MembersView: React.FC<MembersViewProps> = ({
                                     }}
                                     className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium"
                                 >
-                                    Delete
+                                    Hapus
                                 </button>
                             </div>
                         </div>
@@ -736,12 +737,12 @@ const MembersView: React.FC<MembersViewProps> = ({
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
                     <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-fade-in-up">
                         <div className="bg-orange-600 px-6 py-4 flex justify-between items-center text-white">
-                            <h3 className="font-bold flex items-center gap-2"><span className="material-icons">sell</span> Set Member Price</h3>
+                            <h3 className="font-bold flex items-center gap-2"><span className="material-icons">sell</span> Atur Harga Pelanggan</h3>
                             <button onClick={() => setIsPriceModalOpen(false)} className="text-orange-200 hover:text-white"><span className="material-icons">close</span></button>
                         </div>
                         <form onSubmit={handlePriceSubmit} className="p-6 space-y-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Gas Type</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Jenis Gas</label>
                                 <select
                                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none"
                                     value={currentPrice.gasType}
@@ -767,19 +768,19 @@ const MembersView: React.FC<MembersViewProps> = ({
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Cylinder Size</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Ukuran Tabung</label>
                                 <select
                                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none"
                                     value={currentPrice.size}
                                     onChange={e => setCurrentPrice({ ...currentPrice, size: e.target.value as any })}
                                 >
-                                    <option value="1m3">Small (1m3)</option>
-                                    <option value="2m3">Medium (2m3)</option>
-                                    <option value="6m3">Large (6m3)</option>
+                                    <option value="1m3">Kecil (1m3)</option>
+                                    <option value="2m3">Sedang (2m3)</option>
+                                    <option value="6m3">Besar (6m3)</option>
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Special Price (IDR)</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Harga Khusus (Rp)</label>
                                 <div className="relative">
                                     <span className="absolute left-3 top-2 text-gray-500 text-sm">Rp</span>
                                     <input
@@ -793,8 +794,8 @@ const MembersView: React.FC<MembersViewProps> = ({
                                 </div>
                             </div>
                             <div className="pt-2 flex justify-end gap-3">
-                                <button type="button" onClick={() => setIsPriceModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Cancel</button>
-                                <button type="submit" className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm font-medium">Save Price</button>
+                                <button type="button" onClick={() => setIsPriceModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Batal</button>
+                                <button type="submit" className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm font-medium">Simpan Harga</button>
                             </div>
                         </form>
                     </div>
@@ -807,17 +808,17 @@ const MembersView: React.FC<MembersViewProps> = ({
                     <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-fade-in-up">
                         <div className="p-6 text-center">
                             <span className="material-icons text-4xl text-red-500 mb-3 block">delete_forever</span>
-                            <h3 className="font-bold text-gray-800 mb-2">Remove Custom Price?</h3>
+                            <h3 className="font-bold text-gray-800 mb-2">Hapus Harga Khusus?</h3>
                             <p className="text-sm text-gray-600 mb-6">
-                                Are you sure you want to remove the special price for <strong>{priceToDelete.gasType} ({priceToDelete.size})</strong>?
+                                Yakin ingin menghapus harga khusus untuk <strong>{priceToDelete.gasType} ({priceToDelete.size})</strong>?
                             </p>
                             <div className="flex justify-center gap-3">
-                                <button onClick={() => setPriceToDelete(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Cancel</button>
+                                <button onClick={() => setPriceToDelete(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Batal</button>
                                 <button
                                     onClick={() => handleDeletePrice(priceToDelete.id)}
                                     className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium"
                                 >
-                                    Remove
+                                    Hapus
                                 </button>
                             </div>
                         </div>

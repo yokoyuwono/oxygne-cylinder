@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+﻿import React, { useState, useRef, useEffect } from 'react';
 import { sendMessageToGemini } from '../services/geminiService';
 import { Cylinder, Member, Transaction, ChatMessage, MemberPrice, RefillStation } from '../types';
 
@@ -18,7 +18,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ cylinders, members, transactions, mem
     {
       id: 'welcome',
       role: 'model',
-      text: 'Hello! I am your Gas Management Assistant. Ask me about cylinder availability, specific serial codes, or member status.',
+      text: 'Halo! Saya asisten manajemen gas Anda. Tanyakan soal ketersediaan tabung, kode seri tertentu, atau status pelanggan.',
       timestamp: new Date(),
     },
   ]);
@@ -86,7 +86,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ cylinders, members, transactions, mem
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="fixed bottom-6 right-6 z-50 p-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg transition-all duration-300 flex items-center justify-center"
-        aria-label="Open Chat"
+        aria-label="Buka Obrolan"
       >
         {isOpen ? (
           <span className="material-icons">close</span>
@@ -125,7 +125,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ cylinders, members, transactions, mem
                       <p key={i} className={i > 0 ? 'mt-1' : ''}>{line}</p>
                   ))}
                   <p className={`text-[10px] mt-1 text-right ${msg.role === 'user' ? 'text-indigo-200' : 'text-gray-400'}`}>
-                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {msg.timestamp.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
                   </p>
                 </div>
               </div>
@@ -152,7 +152,7 @@ const ChatBot: React.FC<ChatBotProps> = ({ cylinders, members, transactions, mem
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyPress}
-                placeholder="Ask about cylinders..."
+                placeholder="Tanya soal tabung..."
                 className="flex-1 border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               />
               <button

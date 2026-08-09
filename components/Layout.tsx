@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { AppUser, UserRole } from '../types';
+import { labelPeran } from '../labels';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -44,7 +45,7 @@ const Layout: React.FC<LayoutProps> = ({ children, currentUser, onLogout }) => {
         <button
           onClick={() => setIsMobileMenuOpen(true)}
           className="p-2 hover:bg-slate-800 rounded-lg transition-colors active:scale-95"
-          aria-label="Open Menu"
+          aria-label="Buka Menu"
         >
           <span className="material-icons">menu</span>
         </button>
@@ -82,42 +83,42 @@ const Layout: React.FC<LayoutProps> = ({ children, currentUser, onLogout }) => {
         </div>
 
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto custom-scrollbar">
-          <p className="px-4 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 mt-2">Main Menu</p>
+          <p className="px-4 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 mt-2">Menu Utama</p>
           <NavLink to="/" className={navLinkClass}>
             <span className="material-icons">dashboard</span>
-            Dashboard
+            Beranda
           </NavLink>
           <NavLink to="/rental" className={navLinkClass}>
             <span className="material-icons">shopping_cart_checkout</span>
-            Rental Out
+            Sewa Keluar
           </NavLink>
           <NavLink to="/delivery" className={navLinkClass}>
             <span className="material-icons">local_shipping</span>
-            Delivery
+            Pengiriman
           </NavLink>
           <NavLink to="/refill" className={navLinkClass}>
             <span className="material-icons">local_gas_station</span>
-            Refill Management
+            Manajemen Isi Ulang
           </NavLink>
           <NavLink to="/inventory" className={navLinkClass}>
             <span className="material-icons">inventory_2</span>
-            Inventory Stock
+            Stok Tabung
           </NavLink>
 
-          <p className="px-4 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 mt-6">Administration</p>
+          <p className="px-4 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 mt-6">Administrasi</p>
           <NavLink to="/members" className={navLinkClass}>
             <span className="material-icons">people</span>
-            Member Directory
+            Data Pelanggan
           </NavLink>
           <NavLink to="/reports" className={navLinkClass}>
             <span className="material-icons">assessment</span>
-            Reports & Logs
+            Laporan &amp; Riwayat
           </NavLink>
 
           {currentUser?.role === UserRole.Admin && (
             <NavLink to="/admin" className={navLinkClass}>
               <span className="material-icons">admin_panel_settings</span>
-              Admin Users
+              Pengguna
             </NavLink>
           )}
         </nav>
@@ -128,10 +129,10 @@ const Layout: React.FC<LayoutProps> = ({ children, currentUser, onLogout }) => {
               {currentUser ? currentUser.name.charAt(0).toUpperCase() : 'G'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm text-white font-medium truncate">{currentUser?.name || 'Guest'}</p>
-              <p className="text-xs text-slate-400 truncate capitalize">{currentUser?.role || 'Viewer'}</p>
+              <p className="text-sm text-white font-medium truncate">{currentUser?.name || 'Tamu'}</p>
+              <p className="text-xs text-slate-400 truncate">{labelPeran(currentUser?.role) }</p>
             </div>
-            <button onClick={handleLogout} className="text-slate-500 hover:text-red-400 transition-colors p-1 rounded" title="Sign Out">
+            <button onClick={handleLogout} className="text-slate-500 hover:text-red-400 transition-colors p-1 rounded" title="Keluar">
               <span className="material-icons text-sm">logout</span>
             </button>
           </div>
@@ -150,19 +151,19 @@ const Layout: React.FC<LayoutProps> = ({ children, currentUser, onLogout }) => {
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-between items-center px-2 py-2 z-30 shadow-[0_-4px_20px_-5px_rgba(0,0,0,0.1)]">
           <NavLink to="/" className={bottomNavLinkClass}>
             <span className="material-icons text-2xl">dashboard</span>
-            Home
+            Beranda
           </NavLink>
           <NavLink to="/rental" className={bottomNavLinkClass}>
             <span className="material-icons text-2xl">shopping_cart</span>
-            Rent
+            Sewa
           </NavLink>
           <NavLink to="/delivery" className={bottomNavLinkClass}>
             <span className="material-icons text-2xl">local_shipping</span>
-            Deliver
+            Kirim
           </NavLink>
           <NavLink to="/inventory" className={bottomNavLinkClass}>
             <span className="material-icons text-2xl">inventory_2</span>
-            Stock
+            Stok
           </NavLink>
           <button
             onClick={() => setIsMobileMenuOpen(true)}

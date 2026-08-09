@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 
 interface LoginProps {
   onLogin: (username: string, pass: string) => Promise<boolean> | boolean;
@@ -17,10 +17,10 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     try {
       const success = await Promise.resolve(onLogin(email, password));
       if (!success) {
-        setError('Invalid email or password');
+        setError('Email atau kata sandi salah');
       }
     } catch (err) {
-      setError('An error occurred during login');
+      setError('Terjadi kesalahan saat masuk');
       console.error(err);
     } finally {
       setIsLoggingIn(false);
@@ -37,7 +37,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             <span className="material-icons text-white text-3xl">propane</span>
           </div>
           <h1 className="text-2xl font-bold text-gray-800">Central Gas</h1>
-          <p className="text-gray-500 text-sm mt-1">Industrial Asset Management</p>
+          <p className="text-gray-500 text-sm mt-1">Manajemen Aset Industri</p>
         </div>
 
         {/* Form */}
@@ -50,7 +50,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Email Address</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Alamat Email</label>
             <div className="relative">
               <span className="material-icons absolute left-3 top-2.5 text-gray-400 text-lg">email</span>
               <input
@@ -58,7 +58,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-gray-800"
-                placeholder="Enter email"
+                placeholder="Masukkan email"
                 required
                 disabled={isLoggingIn}
               />
@@ -66,7 +66,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Kata Sandi</label>
             <div className="relative">
               <span className="material-icons absolute left-3 top-2.5 text-gray-400 text-lg">lock</span>
               <input
@@ -74,7 +74,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-gray-800"
-                placeholder="Enter password"
+                placeholder="Masukkan kata sandi"
                 required
                 disabled={isLoggingIn}
               />
@@ -84,9 +84,9 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           <div className="flex items-center justify-between text-sm">
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" className="rounded text-blue-600 focus:ring-blue-500" />
-              <span className="text-gray-600">Remember me</span>
+              <span className="text-gray-600">Ingat saya</span>
             </label>
-            <button type="button" className="text-blue-600 hover:text-blue-800 font-medium">Forgot Password?</button>
+            <button type="button" className="text-blue-600 hover:text-blue-800 font-medium">Lupa Kata Sandi?</button>
           </div>
 
           <button
@@ -95,10 +95,10 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-3 rounded-lg shadow-lg shadow-blue-200 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
           >
             {isLoggingIn ? (
-              <span>Signing In...</span>
+              <span>Sedang Masuk...</span>
             ) : (
               <>
-                <span>Sign In</span>
+                <span>Masuk</span>
                 <span className="material-icons text-sm">arrow_forward</span>
               </>
             )}
@@ -106,7 +106,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         </form>
 
         <p className="text-center text-xs text-gray-400 mt-8">
-          Note: Ensure you have a registered user in your Supabase Auth.
+          Catatan: pastikan akun sudah terdaftar di Supabase Auth.
         </p>
       </div>
     </div>

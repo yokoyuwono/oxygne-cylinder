@@ -31,7 +31,8 @@ export enum CylinderStatus {
   // Tabung yang posisinya tidak diketahui -- warisan pencatatan yang tidak
   // dijalankan. Bukan bagian dari armada yang bisa disewakan, jadi dikecualikan
   // dari perhitungan utilisasi dan stok di Dashboard.
-  Unknown = 'Tidak Diketahui',
+  // Nilainya Inggris seperti status lain; labelnya diterjemahkan di labels.ts.
+  Unknown = 'Unknown',
 }
 
 export enum CylinderSize {

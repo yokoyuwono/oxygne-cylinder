@@ -1,6 +1,7 @@
-
+﻿
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Cylinder, CylinderStatus, GasType, CylinderSize, Transaction } from '../types';
+import { labelStatusTabung } from '../labels';
 import { supabase } from '../lib/supabase';
 
 interface CylinderListProps {
@@ -125,7 +126,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     
     const isLongTerm = diffDays > 30;
-    const text = diffDays === 0 ? 'Today' : `${diffDays} Day${diffDays > 1 ? 's' : ''}`;
+    const text = diffDays === 0 ? 'Hari ini' : `${diffDays} Hari`;
 
     return { text, isLongTerm };
   };
@@ -221,7 +222,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
   const parseCSV = (csvText: string) => {
       const lines = csvText.split('\n').map(line => line.trim()).filter(line => line);
       if (lines.length < 2) {
-          alert("CSV is empty or missing headers");
+          alert("Berkas CSV kosong atau tidak punya baris judul");
           return;
       }
 
@@ -294,13 +295,13 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
   return (
     <div className="space-y-4 animate-fade-in pb-20 md:pb-0">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <h2 className="text-2xl font-bold text-gray-800">Inventory</h2>
+        <h2 className="text-2xl font-bold text-gray-800">Stok Tabung</h2>
         <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
           <div className="relative flex-1 md:w-64">
             <span className="material-icons absolute left-3 top-2.5 text-gray-400 text-sm">search</span>
             <input 
               type="text" 
-              placeholder="Search code or gas..." 
+              placeholder="Cari kode atau gas..." 
               className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -311,8 +312,8 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
             value={filterStatus}
             onChange={(e) => { setFilterStatus(e.target.value); setCurrentPage(1); }}
           >
-            <option value="All">All Status</option>
-            {Object.values(CylinderStatus).map(s => <option key={s} value={s}>{s}</option>)}
+            <option value="All">Semua Status</option>
+            {Object.values(CylinderStatus).map(s => <option key={s} value={s}>{labelStatusTabung(s)}</option>)}
           </select>
           
           <div className="flex gap-2">
@@ -321,14 +322,14 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                 className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors"
             >
                 <span className="material-icons text-sm">upload_file</span>
-                Import
+                Impor
             </button>
             <button 
                 onClick={handleOpenAdd}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors"
             >
                 <span className="material-icons text-sm">add</span>
-                Add
+                Tambah
             </button>
           </div>
         </div>
@@ -338,19 +339,19 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
         {isLoading ? (
             <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
                 <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-3"></div>
-                <p className="text-sm">Loading inventory...</p>
+                <p className="text-sm">Memuat stok tabung...</p>
             </div>
         ) : (
             <div className="overflow-x-auto flex-1">
             <table className="w-full text-left text-sm text-gray-600">
                 <thead className="bg-gray-50 text-gray-700 uppercase font-medium">
                 <tr>
-                    <th className="px-6 py-3">Code</th>
-                    <th className="px-6 py-3">Gas Type</th>
-                    <th className="px-6 py-3">Size</th>
+                    <th className="px-6 py-3">Kode</th>
+                    <th className="px-6 py-3">Jenis Gas</th>
+                    <th className="px-6 py-3">Ukuran</th>
                     <th className="px-6 py-3">Status</th>
-                    <th className="px-6 py-3">Location</th>
-                    <th className="px-6 py-3 text-right">Actions</th>
+                    <th className="px-6 py-3">Lokasi</th>
+                    <th className="px-6 py-3 text-right">Aksi</th>
                 </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -366,7 +367,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                         <td className="px-6 py-4">
                             <div className="flex flex-col items-start gap-1">
                             <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(cyl.status)}`}>
-                                {cyl.status}
+                                {labelStatusTabung(cyl.status)}
                             </span>
                             {duration && (
                                 <span className={`text-[10px] font-medium flex items-center gap-1 ${duration.isLongTerm ? 'text-red-600' : 'text-gray-500'}`}>
@@ -394,7 +395,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                     <tr>
                     <td colSpan={6} className="px-6 py-20 text-center text-gray-400">
                         <span className="material-icons text-4xl mb-2 text-gray-300">search_off</span>
-                        <p>No cylinders found matching your criteria.</p>
+                        <p>Tidak ada tabung yang cocok dengan pencarian Anda.</p>
                     </td>
                     </tr>
                 )}
@@ -406,7 +407,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
         {/* Pagination Footer */}
         <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-sm text-gray-600">
-                <span className="hidden md:inline">Show</span>
+                <span className="hidden md:inline">Tampilkan</span>
                 <select 
                     value={itemsPerPage}
                     onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
@@ -417,10 +418,10 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                     <option value={250}>250</option>
                     <option value={500}>500</option>
                 </select>
-                <span className="hidden md:inline">items</span>
+                <span className="hidden md:inline">item</span>
                 <span className="text-gray-400 mx-2 hidden md:inline">|</span>
                 <span>
-                    {totalItems > 0 ? `${startItem}-${endItem}` : '0'} of {totalItems} records
+                    {totalItems > 0 ? `${startItem}-${endItem}` : '0'} dari {totalItems} record
                 </span>
             </div>
 
@@ -434,7 +435,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                 </button>
                 
                 <span className="text-sm font-medium text-gray-700 bg-white px-3 py-1.5 md:py-2 border border-gray-300 rounded-lg shadow-sm">
-                    Page {currentPage} of {totalPages || 1}
+                    Halaman {currentPage} dari {totalPages || 1}
                 </span>
 
                 <button
@@ -460,19 +461,19 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                 </div>
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Serial Code</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Kode Seri</label>
                         <input 
                             type="text" 
                             required
                             value={currentCyl.serialCode}
                             onChange={(e) => setCurrentCyl({...currentCyl, serialCode: e.target.value.toUpperCase()})}
                             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none uppercase font-mono"
-                            placeholder="e.g. OXY-9999"
+                            placeholder="mis. OXY-9999"
                         />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Gas Type</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Jenis Gas</label>
                             <select 
                                 value={currentCyl.gasType}
                                 onChange={(e) => setCurrentCyl({...currentCyl, gasType: e.target.value as GasType})}
@@ -482,7 +483,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Size</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Ukuran</label>
                             <select 
                                 value={currentCyl.size}
                                 onChange={(e) => setCurrentCyl({...currentCyl, size: e.target.value as CylinderSize})}
@@ -493,17 +494,17 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                         </div>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Current Status</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Status Saat Ini</label>
                         <select 
                             value={currentCyl.status}
                             onChange={(e) => setCurrentCyl({...currentCyl, status: e.target.value as CylinderStatus})}
                             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                         >
-                            {Object.values(CylinderStatus).map(s => <option key={s} value={s}>{s}</option>)}
+                            {Object.values(CylinderStatus).map(s => <option key={s} value={s}>{labelStatusTabung(s)}</option>)}
                         </select>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Last Location</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Lokasi Terakhir</label>
                         <input 
                             type="text" 
                             value={currentCyl.lastLocation}
@@ -518,7 +519,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                             onClick={() => setIsModalOpen(false)}
                             className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
                         >
-                            Cancel
+                            Batal
                         </button>
                         <button 
                             type="submit"
@@ -539,7 +540,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                 <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center shrink-0">
                     <h3 className="font-bold text-gray-800 flex items-center gap-2">
                         <span className="material-icons text-green-600">table_view</span>
-                        Import Cylinders
+                        Impor Tabung
                     </h3>
                     <button onClick={() => {setIsImportModalOpen(false); setImportedData([]); setImportErrors({})}} className="text-gray-400 hover:text-gray-600">
                         <span className="material-icons">close</span>
@@ -551,12 +552,12 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                     {importedData.length === 0 ? (
                         <div className="space-y-6">
                              <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg text-sm text-blue-800">
-                                 <p className="font-bold mb-1">Instructions:</p>
+                                 <p className="font-bold mb-1">Petunjuk:</p>
                                  <ul className="list-disc pl-5 space-y-1">
-                                     <li>File must be a <strong>.csv</strong> format.</li>
-                                     <li>Columns order: <strong>serialCode, gasType, size, status, lastLocation</strong>.</li>
-                                     <li>Supported Gases: All major industrial/medical gases (e.g. Oxygen, Helium, LPG, etc).</li>
-                                     <li>Valid Sizes: {Object.values(CylinderSize).join(', ')}.</li>
+                                     <li>Berkas harus berformat <strong>.csv</strong>.</li>
+                                     <li>Urutan kolom: <strong>serialCode, gasType, size, status, lastLocation</strong>.</li>
+                                     <li>Gas yang didukung: semua gas industri/medis utama (mis. Oxygen, Helium, LPG, dll).</li>
+                                     <li>Ukuran yang valid: {Object.values(CylinderSize).join(', ')}.</li>
                                  </ul>
                              </div>
 
@@ -564,8 +565,8 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm mb-4">
                                      <span className="material-icons text-3xl text-indigo-500">upload_file</span>
                                  </div>
-                                 <p className="text-gray-700 font-medium">Click to upload CSV file</p>
-                                 <p className="text-xs text-gray-400 mt-1">Maximum 5MB</p>
+                                 <p className="text-gray-700 font-medium">Klik untuk unggah berkas CSV</p>
+                                 <p className="text-xs text-gray-400 mt-1">Maksimal 5MB</p>
                                  <input 
                                      type="file" 
                                      ref={fileInputRef}
@@ -577,7 +578,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
 
                              <div className="text-center">
                                  <button onClick={downloadTemplate} className="text-indigo-600 text-sm font-medium hover:underline flex items-center justify-center gap-1 mx-auto">
-                                     <span className="material-icons text-sm">download</span> Download CSV Template
+                                     <span className="material-icons text-sm">download</span> Unduh Template CSV
                                  </button>
                              </div>
                         </div>
@@ -585,14 +586,14 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                         <div className="space-y-4">
                             <div className="flex justify-between items-center">
                                 <div>
-                                    <h4 className="font-bold text-gray-800">Preview Data</h4>
+                                    <h4 className="font-bold text-gray-800">Pratinjau Data</h4>
                                     <p className="text-xs text-gray-500">
                                         Found {importedData.length} rows. 
                                         {Object.keys(importErrors).length > 0 && <span className="text-red-500 ml-1 font-bold">{Object.keys(importErrors).length} errors found.</span>}
                                     </p>
                                 </div>
                                 <button onClick={() => {setImportedData([]); setImportErrors({})}} className="text-sm text-red-500 hover:text-red-700">
-                                    Clear & Re-upload
+                                    Hapus &amp; Unggah Ulang
                                 </button>
                             </div>
 
@@ -601,10 +602,10 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                                     <thead className="bg-gray-50 text-gray-600 font-medium sticky top-0">
                                         <tr>
                                             <th className="px-4 py-2">Status</th>
-                                            <th className="px-4 py-2">Code</th>
+                                            <th className="px-4 py-2">Kode</th>
                                             <th className="px-4 py-2">Gas</th>
-                                            <th className="px-4 py-2">Size</th>
-                                            <th className="px-4 py-2">Location</th>
+                                            <th className="px-4 py-2">Ukuran</th>
+                                            <th className="px-4 py-2">Lokasi</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
@@ -613,7 +614,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                                                 <td className="px-4 py-2">
                                                     {importErrors[idx] ? (
                                                         <span className="text-red-600 font-bold flex items-center gap-1">
-                                                            <span className="material-icons text-sm">error</span> Error
+                                                            <span className="material-icons text-sm">error</span> Galat
                                                         </span>
                                                     ) : (
                                                         <span className="text-green-600 font-bold flex items-center gap-1">
@@ -641,7 +642,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                             onClick={() => {setIsImportModalOpen(false); setImportedData([]); setImportErrors({})}}
                             className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium transition-colors"
                         >
-                            Cancel
+                            Batal
                         </button>
                         <button 
                             onClick={handleConfirmImport}
@@ -664,7 +665,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                 <div className="bg-red-600 px-6 py-4 border-b border-red-700 flex justify-between items-center text-white">
                     <h3 className="font-bold flex items-center gap-2">
                         <span className="material-icons">warning</span>
-                        Confirm Deletion
+                        Konfirmasi Penghapusan
                     </h3>
                     <button onClick={() => setCylinderToDelete(null)} className="text-red-100 hover:text-white">
                         <span className="material-icons">close</span>
@@ -672,23 +673,23 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                 </div>
                 <div className="p-6">
                     <p className="text-gray-700 text-sm mb-4">
-                        Are you sure you want to delete cylinder <strong>{cylinderToDelete.serialCode}</strong>?
+                        Yakin ingin menghapus tabung <strong>{cylinderToDelete.serialCode}</strong>?
                     </p>
                     <p className="text-xs text-red-600 bg-red-50 p-2 rounded mb-4">
-                        This action cannot be undone and will remove the cylinder from inventory records.
+                        Tindakan ini tidak bisa dibatalkan dan akan menghapus tabung dari catatan stok.
                     </p>
                     <div className="flex justify-end gap-3">
                         <button 
                             onClick={() => setCylinderToDelete(null)}
                             className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
                         >
-                            Cancel
+                            Batal
                         </button>
                         <button 
                             onClick={confirmDelete}
                             className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-bold shadow-md shadow-red-200 transition-colors"
                         >
-                            Delete Cylinder
+                            Hapus Tabung
                         </button>
                     </div>
                 </div>
