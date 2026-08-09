@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Cylinder, CylinderStatus, GasType, Transaction, Member, RefillStation, MemberStatus } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { useNavigate } from 'react-router-dom';
@@ -114,37 +114,37 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
 
             switch (tx.type) {
                 case 'RENTAL_OUT':
-                    description = `Rented ${cyl?.gasType} (${cyl?.serialCode}) to ${member?.companyName}`;
+                    description = `Menyewakan ${cyl?.gasType} (${cyl?.serialCode}) ke ${member?.companyName}`;
                     icon = 'shopping_cart_checkout';
                     colorClass = 'text-blue-600 bg-blue-50';
                     break;
                 case 'RETURN':
-                    description = `Received ${cyl?.serialCode} from ${member?.companyName}`;
+                    description = `Menerima ${cyl?.serialCode} dari ${member?.companyName}`;
                     icon = 'assignment_return';
                     colorClass = 'text-green-600 bg-green-50';
                     break;
                 case 'REFILL_OUT':
-                    description = `Sent ${cyl?.serialCode} to ${station?.name}`;
+                    description = `Mengirim ${cyl?.serialCode} ke ${station?.name}`;
                     icon = 'local_shipping';
                     colorClass = 'text-orange-600 bg-orange-50';
                     break;
                 case 'REFILL_IN':
-                    description = `Restocked ${cyl?.serialCode} from refill`;
+                    description = `Menerima kembali ${cyl?.serialCode} dari isi ulang`;
                     icon = 'inventory';
                     colorClass = 'text-indigo-600 bg-indigo-50';
                     break;
                 case 'DEPOSIT_REFUND':
-                    description = `Refunded deposit to ${member?.companyName}`;
+                    description = `Mengembalikan deposit ke ${member?.companyName}`;
                     icon = 'savings';
                     colorClass = 'text-purple-600 bg-purple-50';
                     break;
                 case 'DEBT_PAYMENT':
-                    description = `Debt payment from ${member?.companyName}`;
+                    description = `Pembayaran utang dari ${member?.companyName}`;
                     icon = 'payments';
                     colorClass = 'text-emerald-600 bg-emerald-50';
                     break;
                 case 'DELIVERY':
-                    description = `Dispatched ${cyl?.serialCode} for delivery`;
+                    description = `Mengirim ${cyl?.serialCode} untuk pengiriman`;
                     icon = 'local_shipping';
                     colorClass = 'text-cyan-600 bg-cyan-50';
                     break;
@@ -398,7 +398,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                                         <div>
                                             <p className="text-sm font-medium text-gray-800">{tx.description}</p>
                                             <p className="text-xs text-gray-400 mt-1">
-                                                {new Date(tx.date).toLocaleDateString('id-ID')} â€¢ {new Date(tx.date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                                                {new Date(tx.date).toLocaleDateString('id-ID')} • {new Date(tx.date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
                                             </p>
                                         </div>
                                     </div>

@@ -201,7 +201,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ cylinders, members, stations 
                                         <p className="text-sm font-medium text-gray-800">{description}</p>
                                         <div className="flex justify-between items-center mt-1">
                                             <p className="text-xs text-gray-400">
-                                                {new Date(tx.date).toLocaleDateString('id-ID')} â€¢ {new Date(tx.date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                                                {new Date(tx.date).toLocaleDateString('id-ID')} • {new Date(tx.date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
                                             </p>
                                             {tx.cost && (
                                                 <p className="text-xs font-bold text-gray-600">

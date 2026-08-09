@@ -535,19 +535,38 @@ const App: React.FC = () => {
     await fetchData();
   };
 
+  /** Regulator sewaan yang dikembalikan: kembali ke stok, lepas dari pemegangnya. */
+  const bebaskanRegulator = async (regulatorIds: string[]) => {
+    if (!regulatorIds.length) return;
+    await supabase.from('regulators')
+      .update({ status: 'Available', currentHolder: null, memberId: null })
+      .in('id', regulatorIds);
+  };
+
   // Handler for rental transactions (Rentals AND Returns)
   const handleRental = async (
     memberId: string,
     rentCylinderIds: string[],
     returnCylinderIds: string[],
     totalCost: number,
-    isUnpaid: boolean = false
+    isUnpaid: boolean = false,
+    returnRegulatorIds: string[] = []
   ) => {
     const member = members.find(m => m.id === memberId);
     if (!member) return;
 
     const date = new Date().toISOString();
     const newTransactions: Transaction[] = [];
+
+    // Regulator sewaan yang ikut dikembalikan bersama tabung.
+    if (returnRegulatorIds.length) {
+      await bebaskanRegulator(returnRegulatorIds);
+      setRegulators(prev => prev.map(r =>
+        returnRegulatorIds.includes(r.id)
+          ? { ...r, status: 'Available' as const, currentHolder: undefined, memberId: undefined }
+          : r
+      ));
+    }
 
     // Update Debt
     if (isUnpaid && totalCost > 0) {

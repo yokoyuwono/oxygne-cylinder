@@ -524,7 +524,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                                   {isIncome ? `Pendapatan Sewa - ${member?.companyName || 'Tidak diketahui'}` : `Biaya Isi Ulang - ${cyl?.gasType}`}
                                               </p>
                                               <p className="text-xs text-gray-500">
-                                                  {new Date(t.date).toLocaleDateString('id-ID')} â€¢ {cyl?.serialCode ? `Item: ${cyl.serialCode}` : 'Operasi Batch'}
+                                                  {new Date(t.date).toLocaleDateString('id-ID')} • {cyl?.serialCode ? `Item: ${cyl.serialCode}` : 'Operasi Batch'}
                                               </p>
                                           </div>
                                       </div>
@@ -626,7 +626,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                                         {cyl ? (
                                                             <div>
                                                                 <div className="font-mono font-medium text-gray-800">{cyl.serialCode}</div>
-                                                                <div className="text-xs text-gray-500">{cyl.gasType} â€¢ {cyl.size}</div>
+                                                                <div className="text-xs text-gray-500">{cyl.gasType} • {cyl.size}</div>
                                                             </div>
                                                         ) : (
                                                             <span className="text-gray-400 italic">N/A</span>
