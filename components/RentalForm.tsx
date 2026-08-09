@@ -1,7 +1,8 @@
 ﻿
 import React, { useState, useEffect, useRef } from 'react';
-import { Cylinder, CylinderStatus, Member, MemberPrice, Transaction, GasPrice } from '../types';
+import { Cylinder, CylinderStatus, Member, MemberPrice, Transaction, GasPrice, RentalTariff, Regulator } from '../types';
 import { supabase } from '../lib/supabase';
+import NewRentalForm, { NewRentalPayload } from './NewRentalForm';
 
 interface RentalFormProps {
     cylinders: Cylinder[];
@@ -9,10 +10,16 @@ interface RentalFormProps {
     prices: MemberPrice[];
     gasPrices: GasPrice[];
     transactions: Transaction[];
+    tariffs: RentalTariff[];
+    regulators: Regulator[];
     onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean) => void;
+    onNewRental: (payload: NewRentalPayload) => Promise<void>;
 }
 
-const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gasPrices, transactions, onCompleteRental }) => {
+const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gasPrices, transactions, tariffs, regulators, onCompleteRental, onNewRental }) => {
+    // 'existing' = alur lama (sewa/kembali untuk pelanggan terpilih),
+    // 'new' = pendaftaran pelanggan sekaligus sewa pertamanya.
+    const [mode, setMode] = useState<'existing' | 'new'>('existing');
     const [selectedMemberId, setSelectedMemberId] = useState<string>('');
     const [selectedMemberObj, setSelectedMemberObj] = useState<Member | null>(null); // Store selected member object directly
     const [cart, setCart] = useState<Cylinder[]>([]);
@@ -315,6 +322,65 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
 
     // --- RENDER ---
 
+    const tabBar = (
+        <div className="flex justify-center mb-6">
+            <div className="bg-gray-100 p-1.5 rounded-xl flex gap-1 flex-wrap justify-center">
+                <button
+                    onClick={() => { setMode('existing'); setTransactionSource('TOKO'); }}
+                    className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'existing' && transactionSource === 'TOKO' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
+                >
+                    <span className="material-icons text-lg">store</span>
+                    Toko
+                </button>
+                <button
+                    onClick={() => { setMode('existing'); setTransactionSource('DELIVERY'); }}
+                    className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'existing' && transactionSource === 'DELIVERY' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
+                >
+                    <span className="material-icons text-lg">local_shipping</span>
+                    Pengiriman
+                </button>
+                <button
+                    onClick={() => setMode('new')}
+                    className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'new' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
+                >
+                    <span className="material-icons text-lg">person_add</span>
+                    Sewa Baru
+                </button>
+            </div>
+        </div>
+    );
+
+    // MODE: SEWA BARU -- daftarkan pelanggan sekaligus catat sewa pertamanya.
+    if (mode === 'new') {
+        return (
+            <div className="animate-fade-in-up p-1 md:p-4">
+                {feedback && (
+                    <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg z-50 flex items-center gap-2 ${feedback.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+                        <span className="material-icons text-lg">{feedback.type === 'success' ? 'check_circle' : 'error'}</span>
+                        <span className="font-medium text-sm">{feedback.msg}</span>
+                    </div>
+                )}
+                <div className="text-center mb-2">
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">Sewa Baru</h1>
+                    <p className="text-gray-500 mb-6 text-sm">Daftarkan pelanggan sekaligus catat sewa pertamanya.</p>
+                </div>
+                {tabBar}
+                <NewRentalForm
+                    cylinders={cylinders}
+                    members={members}
+                    tariffs={tariffs}
+                    regulators={regulators}
+                    onSubmit={async (payload) => {
+                        await onNewRental(payload);
+                        showFeedback('Sewa baru tersimpan.');
+                        setMode('existing');
+                    }}
+                    onCancel={() => setMode('existing')}
+                />
+            </div>
+        );
+    }
+
     // MODE 1: START (No Member Selected)
     if (!selectedMemberId) {
         return (
@@ -333,24 +399,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                     <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">Transaksi Baru</h1>
                     <p className="text-gray-500 mb-8 text-sm md:text-base">Pilih pelanggan untuk mulai menyewakan atau memproses pengembalian.</p>
 
-                    <div className="flex justify-center mb-6">
-                        <div className="bg-gray-100 p-1.5 rounded-xl flex gap-1">
-                            <button
-                                onClick={() => setTransactionSource('TOKO')}
-                                className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${transactionSource === 'TOKO' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
-                            >
-                                <span className="material-icons text-lg">store</span>
-                                Toko
-                            </button>
-                            <button
-                                onClick={() => setTransactionSource('DELIVERY')}
-                                className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${transactionSource === 'DELIVERY' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
-                            >
-                                <span className="material-icons text-lg">local_shipping</span>
-                                Pengiriman
-                            </button>
-                        </div>
-                    </div>
+                    {tabBar}
 
                     <div className="relative text-left">
                         <input

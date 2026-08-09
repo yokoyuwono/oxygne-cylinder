@@ -14,6 +14,7 @@ import Login from './components/Login';
 import AdminView from './components/AdminView';
 import HistoryView from './components/HistoryView';
 import MasterDataView from './components/MasterDataView';
+import { NewRentalPayload } from './components/NewRentalForm';
 import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff, Regulator } from './types';
 import { supabase, isSupabaseConfigured, fetchAllRecords } from './lib/supabase';
 
@@ -415,6 +416,125 @@ const App: React.FC = () => {
     setTransactions(prev => [...prev, ...newTransactions]);
   };
 
+  /**
+   * Sewa baru: daftarkan pelanggan (atau pakai yang sudah ada) sekaligus catat
+   * sewa pertamanya, termasuk deposit jaminan dan regulator.
+   *
+   * Nominal tarif sudah disalin ke tiap item oleh form, jadi yang tersimpan di
+   * transaksi adalah angka saat itu -- mengubah master data nanti tidak akan
+   * menulis ulang riwayat ini.
+   *
+   * cost sengaja hanya berisi pendapatan (sewa + gas + regulator). Deposit masuk
+   * kolom depositAmount supaya Laporan Keuangan tidak melaporkan titipan sebagai laba.
+   */
+  const handleNewRental = async (payload: NewRentalPayload) => {
+    const { isNewMember, member, rentalDate, items, totals } = payload;
+
+    // -- 1. Pelanggan --
+    let memberId = member.id || '';
+
+    if (isNewMember) {
+      memberId = `m-${Date.now()}`;
+      const baru: Member & { ktp?: string } = {
+        id: memberId,
+        name: member.name,
+        companyName: member.name,
+        address: member.address,
+        phone: member.phone,
+        ktp: member.ktp,
+        totalDeposit: totals.deposit,
+        totalDebt: 0,
+        joinDate: rentalDate,
+        status: MemberStatus.Active,
+      };
+      const { error } = await supabase.from('members').insert(baru);
+      if (error) {
+        // Index unik parsial pada ktp: nomor yang sama tidak boleh didaftarkan dua kali.
+        throw new Error(
+          error.code === '23505'
+            ? `KTP ${member.ktp} sudah terdaftar atas pelanggan lain.`
+            : `Gagal menyimpan pelanggan: ${error.message}`
+        );
+      }
+    } else {
+      const lama = members.find(m => m.id === memberId);
+      const depositBaru = (lama?.totalDeposit || 0) + totals.deposit;
+      const { error } = await supabase.from('members').update({ totalDeposit: depositBaru }).eq('id', memberId);
+      if (error) throw new Error(`Gagal memperbarui deposit pelanggan: ${error.message}`);
+    }
+
+    // -- 2. Harga gas jadi harga tetap pelanggan --
+    // Satu baris per kombinasi jenis gas + ukuran; kalau pelanggan menyewa dua
+    // tabung sejenis, harga terakhir yang dipakai.
+    const hargaUnik = new Map<string, { gasType: string; size: string; price: number }>();
+    items.forEach(i => hargaUnik.set(`${i.gasType}|${i.size}`, { gasType: i.gasType, size: i.size, price: i.gasPrice }));
+
+    const barisHarga = [...hargaUnik.values()].map((h, idx) => ({
+      id: `mp-${Date.now()}-${idx}`,
+      memberId,
+      gasType: h.gasType,
+      size: h.size,
+      price: h.price,
+    }));
+
+    for (const baris of barisHarga) {
+      const adaLama = memberPrices.find(
+        p => p.memberId === memberId && p.gasType === baris.gasType && p.size === baris.size
+      );
+      if (adaLama) {
+        await supabase.from('member_prices').update({ price: baris.price }).eq('id', adaLama.id);
+      } else {
+        await supabase.from('member_prices').insert(baris);
+      }
+    }
+
+    // -- 3. Tabung berpindah ke pelanggan --
+    const cylinderIds = items.map(i => i.cylinderId);
+    const { error: errCyl } = await supabase.from('cylinders').update({
+      status: CylinderStatus.Rented,
+      currentHolder: member.name,
+      lastLocation: member.name,
+    }).in('id', cylinderIds);
+    if (errCyl) throw new Error(`Gagal memperbarui status tabung: ${errCyl.message}`);
+
+    // -- 4. Regulator: yang disewa jadi Rented, yang dibeli jadi Sold --
+    const disewa = items.filter(i => i.regulatorRentId).map(i => i.regulatorRentId!);
+    const dijual = items.filter(i => i.regulatorSaleId).map(i => i.regulatorSaleId!);
+
+    if (disewa.length) {
+      await supabase.from('regulators')
+        .update({ status: 'Rented', currentHolder: member.name, memberId })
+        .in('id', disewa);
+    }
+    if (dijual.length) {
+      await supabase.from('regulators')
+        .update({ status: 'Sold', currentHolder: member.name, memberId })
+        .in('id', dijual);
+    }
+
+    // -- 5. Transaksi, satu per tabung, rincian dibekukan --
+    const newTransactions: Transaction[] = items.map((i, idx) => ({
+      id: `t-new-${Date.now()}-${idx}`,
+      cylinderId: i.cylinderId,
+      memberId,
+      type: 'RENTAL_OUT',
+      date: rentalDate,
+      cost: i.rentalFee + i.gasPrice + (i.regulatorFee || 0) + (i.regulatorSalePrice || 0),
+      paymentStatus: 'PAID',
+      depositAmount: i.depositAmount,
+      rentalFee: i.rentalFee,
+      gasPrice: i.gasPrice,
+      regulatorFee: i.regulatorFee,
+      regulatorSalePrice: i.regulatorSalePrice,
+      regulatorId: i.regulatorRentId || i.regulatorSaleId,
+    }));
+
+    const { error: errTx } = await supabase.from('transactions').insert(newTransactions);
+    if (errTx) throw new Error(`Gagal mencatat transaksi: ${errTx.message}`);
+
+    await fetchData();
+  };
+
   // Handler for rental transactions (Rentals AND Returns)
   const handleRental = async (
     memberId: string,
@@ -554,7 +674,10 @@ const App: React.FC = () => {
               prices={memberPrices}
               gasPrices={gasPrices}
               transactions={transactions}
+              tariffs={tariffs}
+              regulators={regulators}
               onCompleteRental={handleRental}
+              onNewRental={handleNewRental}
             />
           } />
           <Route path="/delivery" element={
