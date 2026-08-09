@@ -69,7 +69,8 @@ const App: React.FC = () => {
         mpData,
         gpData,
         rsData,
-        rpData
+        rpData,
+        prData
       ] = await Promise.all([
         fetchAllRecords<Cylinder>('cylinders'),
         fetchAllRecords<Member>('members'),
@@ -77,7 +78,8 @@ const App: React.FC = () => {
         fetchAllRecords<MemberPrice>('member_prices'),
         fetchAllRecords<GasPrice>('refill_prices'),
         fetchAllRecords<RefillStation>('refill_stations'),
-        fetchAllRecords<RefillPrice>('refill_prices')
+        fetchAllRecords<RefillPrice>('refill_prices'),
+        fetchAllRecords<AppUser>('profiles')
       ]);
 
       if (cylData) setCylinders(cylData);
@@ -87,6 +89,7 @@ const App: React.FC = () => {
       if (gpData) setGasPrices(gpData);
       if (rsData) setRefillStations(rsData);
       if (rpData) setRefillPrices(rpData);
+      if (prData) setUsers(prData);
 
     } catch (error) {
       console.error("Error fetching data:", error);
