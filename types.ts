@@ -122,7 +122,7 @@ export interface Transaction {
   cylinderId?: string; // Optional for DEBT_PAYMENT
   memberId?: string;
   refillStationId?: string; // For refill transactions
-  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEPOSIT_REFUND' | 'DELIVERY';
+  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEPOSIT_REFUND' | 'DELIVERY' | 'GAS_EXCHANGE';
   date: string;
   rentalDuration?: number; // Days held (relevant for RETURN type)
   cost?: number; // Revenue only -- rental fee + gas + regulator. Deposit is NOT included.
@@ -137,6 +137,11 @@ export interface Transaction {
   regulatorFee?: number;       // Regulator rental charge
   regulatorSalePrice?: number; // Regulator sale price
   regulatorId?: string;        // Which regulator unit was rented or sold
+
+  // Baris stok curah tidak punya cylinderId -- botolnya tidak berkode dan tidak
+  // bisa dibedakan satu sama lain, jadi ukurannya disimpan langsung di sini.
+  quantity?: number;
+  size?: CylinderSize;
 }
 
 export type RegulatorStatus = 'Available' | 'Rented' | 'Sold' | 'Damaged';
@@ -171,6 +176,22 @@ export interface RentalTariff {
   salePrice: number;
   isActive: boolean;
   createdAt?: string;
+
+  /**
+   * Ukuran ini dilacak per unit (punya kode di tabungnya) atau sebagai stok curah.
+   * Tabung 1m3 tidak berkode -- botolnya saling gantikan, jadi tidak bisa
+   * diperlakukan sebagai aset bernama.
+   */
+  isCoded: boolean;
+
+  /**
+   * Jumlah botol yang dimiliki toko, hanya berlaku saat isCoded = false.
+   *
+   * Ini angka KEPEMILIKAN, bukan kesiapan. Tukar isi tidak menggerakkannya sama
+   * sekali karena botol masuk satu dan keluar satu; yang menggerakkan hanya botol
+   * yang pergi atau kembali permanen.
+   */
+  stockQty: number;
 }
 
 // Chat types

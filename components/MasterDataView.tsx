@@ -38,8 +38,8 @@ const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, onRefresh }) =
     setIsEditing(false);
     setDraft(
       activeTab === 'cylinder'
-        ? { kind: 'CYLINDER', gasType: GasType.Oxygen, size: CylinderSize.Large, depositAmount: 0, rentalFee: 0, gasPrice: 0, salePrice: 0, isActive: true }
-        : { kind: 'REGULATOR', name: '', rentalFee: 0, salePrice: 0, depositAmount: 0, gasPrice: 0, isActive: true }
+        ? { kind: 'CYLINDER', gasType: GasType.Oxygen, size: CylinderSize.Large, depositAmount: 0, rentalFee: 0, gasPrice: 0, salePrice: 0, isActive: true, isCoded: true, stockQty: 0 }
+        : { kind: 'REGULATOR', name: '', rentalFee: 0, salePrice: 0, depositAmount: 0, gasPrice: 0, isActive: true, isCoded: true, stockQty: 0 }
     );
     setIsModalOpen(true);
   };
@@ -65,6 +65,8 @@ const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, onRefresh }) =
       rentalFee: Number(draft.rentalFee) || 0,
       gasPrice: Number(draft.gasPrice) || 0,
       salePrice: Number(draft.salePrice) || 0,
+      isCoded: draft.kind === 'CYLINDER' ? (draft.isCoded ?? true) : true,
+      stockQty: draft.kind === 'CYLINDER' && draft.isCoded === false ? (Number(draft.stockQty) || 0) : 0,
       isActive: draft.isActive ?? true,
     };
 
@@ -171,13 +173,15 @@ const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, onRefresh }) =
                   <th className="px-6 py-3 text-right">Deposit Jaminan</th>
                   <th className="px-6 py-3 text-right">Biaya Sewa</th>
                   <th className="px-6 py-3 text-right">Harga Gas</th>
+                  <th className="px-6 py-3 text-center">Berkode</th>
+                  <th className="px-6 py-3 text-right">Jumlah Stok</th>
                   <th className="px-6 py-3 text-center">Aktif</th>
                   <th className="px-6 py-3 text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {cylinderTariffs.length === 0 ? (
-                  <tr><td colSpan={7} className="px-6 py-10 text-center text-gray-400">Belum ada tarif tabung.</td></tr>
+                  <tr><td colSpan={9} className="px-6 py-10 text-center text-gray-400">Belum ada tarif tabung.</td></tr>
                 ) : cylinderTariffs.map(t => (
                   <tr key={t.id} className={`hover:bg-gray-50 group ${!t.isActive ? 'opacity-50' : ''}`}>
                     <td className="px-6 py-4 font-bold text-gray-800">{t.gasType}</td>
@@ -185,6 +189,16 @@ const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, onRefresh }) =
                     <td className="px-6 py-4 text-right font-mono text-gray-700">{formatIDR(t.depositAmount)}</td>
                     <td className="px-6 py-4 text-right font-mono text-gray-700">{formatIDR(t.rentalFee)}</td>
                     <td className="px-6 py-4 text-right font-mono text-gray-700">{formatIDR(t.gasPrice)}</td>
+                    <td className="px-6 py-4 text-center">
+                      {t.isCoded ? (
+                        <span className="text-xs font-semibold bg-blue-100 text-blue-700 px-2 py-1 rounded-full">Berkode</span>
+                      ) : (
+                        <span className="text-xs font-semibold bg-amber-100 text-amber-700 px-2 py-1 rounded-full">Tanpa kode</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-right font-mono text-gray-700">
+                      {t.isCoded ? <span className="text-gray-300">&mdash;</span> : `${t.stockQty} botol`}
+                    </td>
                     <td className="px-6 py-4 text-center">
                       <button
                         onClick={() => toggleActive(t)}
@@ -306,6 +320,31 @@ const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, onRefresh }) =
                     {numberField('Biaya Sewa', 'rentalFee', 'Sekali bayar di awal')}
                   </div>
                   {numberField('Harga Gas', 'gasPrice', 'Bisa diubah per pelanggan saat mengisi form sewa')}
+
+                  <div className="pt-2 border-t border-gray-100">
+                    <label className="flex items-start gap-2.5 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={draft.isCoded ?? true}
+                        onChange={e => setDraft({ ...draft, isCoded: e.target.checked })}
+                        className="rounded border-gray-300 mt-0.5"
+                      />
+                      <span>
+                        Tabung berkode
+                        <span className="block text-[11px] text-gray-400 mt-0.5">
+                          Matikan untuk ukuran yang botolnya tidak berkode dan saling gantikan,
+                          seperti 1m3. Ukuran tanpa kode dilacak sebagai jumlah, bukan per unit.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+
+                  {draft.isCoded === false && (
+                    <div className="bg-amber-50 border border-amber-100 rounded-lg p-3">
+                      {numberField('Jumlah Stok (botol)', 'stockQty',
+                        'Jumlah botol yang dimiliki toko. Tukar isi tidak mengubah angka ini -- botol masuk satu, keluar satu.')}
+                    </div>
+                  )}
                 </>
               ) : (
                 <>

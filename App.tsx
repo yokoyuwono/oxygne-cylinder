@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
@@ -14,8 +14,9 @@ import Login from './components/Login';
 import AdminView from './components/AdminView';
 import HistoryView from './components/HistoryView';
 import MasterDataView from './components/MasterDataView';
+import GasExchangeView, { GasExchangePayload } from './components/GasExchangeView';
 import { NewRentalPayload } from './components/NewRentalForm';
-import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff, Regulator } from './types';
+import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff, Regulator } from './types';
 import { supabase, isSupabaseConfigured, fetchAllRecords } from './lib/supabase';
 
 const App: React.FC = () => {
@@ -488,14 +489,27 @@ const App: React.FC = () => {
       }
     }
 
-    // -- 3. Tabung berpindah ke pelanggan --
-    const cylinderIds = items.map(i => i.cylinderId);
-    const { error: errCyl } = await supabase.from('cylinders').update({
-      status: CylinderStatus.Rented,
-      currentHolder: member.name,
-      lastLocation: member.name,
-    }).in('id', cylinderIds);
-    if (errCyl) throw new Error(`Gagal memperbarui status tabung: ${errCyl.message}`);
+    // -- 3. Tabung berkode berpindah ke pelanggan --
+    const cylinderIds = items.map(i => i.cylinderId).filter(Boolean) as string[];
+    if (cylinderIds.length) {
+      const { error: errCyl } = await supabase.from('cylinders').update({
+        status: CylinderStatus.Rented,
+        currentHolder: member.name,
+        lastLocation: member.name,
+      }).in('id', cylinderIds);
+      if (errCyl) throw new Error(`Gagal memperbarui status tabung: ${errCyl.message}`);
+    }
+
+    // -- 3b. Botol tanpa kode: kurangi jumlah stok yang dimiliki toko --
+    // Botolnya pergi bersama pelanggan, jadi kepemilikan toko berkurang. Berbeda
+    // dengan tukar isi, yang tidak menggerakkan angka ini sama sekali.
+    for (const item of items.filter(i => !i.cylinderId)) {
+      const tarif = tariffs.find(t => t.kind === 'CYLINDER' && t.gasType === item.gasType && t.size === item.size);
+      if (!tarif) continue;
+      const sisa = Math.max(0, (tarif.stockQty || 0) - item.quantity);
+      const { error } = await supabase.from('rental_tariffs').update({ stockQty: sisa }).eq('id', tarif.id);
+      if (error) throw new Error(`Gagal memperbarui stok ${item.gasType} ${item.size}: ${error.message}`);
+    }
 
     // -- 4. Regulator: yang disewa jadi Rented, yang dibeli jadi Sold --
     const disewa = items.filter(i => i.regulatorRentId).map(i => i.regulatorRentId!);
@@ -513,26 +527,55 @@ const App: React.FC = () => {
     }
 
     // -- 5. Transaksi, satu per tabung, rincian dibekukan --
+    // Nominal pada item berlaku per botol; baris curah dikalikan jumlahnya.
     const newTransactions: Transaction[] = items.map((i, idx) => ({
       id: `t-new-${Date.now()}-${idx}`,
       cylinderId: i.cylinderId,
       memberId,
       type: 'RENTAL_OUT',
       date: rentalDate,
-      cost: i.rentalFee + i.gasPrice + (i.regulatorFee || 0) + (i.regulatorSalePrice || 0),
+      cost: (i.rentalFee + i.gasPrice) * i.quantity + (i.regulatorFee || 0) + (i.regulatorSalePrice || 0),
       paymentStatus: 'PAID',
-      depositAmount: i.depositAmount,
-      rentalFee: i.rentalFee,
-      gasPrice: i.gasPrice,
+      depositAmount: i.depositAmount * i.quantity,
+      rentalFee: i.rentalFee * i.quantity,
+      gasPrice: i.gasPrice * i.quantity,
       regulatorFee: i.regulatorFee,
       regulatorSalePrice: i.regulatorSalePrice,
       regulatorId: i.regulatorRentId || i.regulatorSaleId,
+      quantity: i.quantity,
+      size: i.size as CylinderSize,
     }));
 
     const { error: errTx } = await supabase.from('transactions').insert(newTransactions);
     if (errTx) throw new Error(`Gagal mencatat transaksi: ${errTx.message}`);
 
     await fetchData();
+  };
+
+  /**
+   * Tukar isi tabung tanpa kode.
+   *
+   * Tidak menyentuh stok sama sekali: botol masuk satu, keluar satu, jadi jumlah
+   * kepemilikan toko tetap. Yang dicatat hanya pendapatan gasnya. memberId boleh
+   * kosong -- siapa pun boleh menukar isi, tidak harus pelanggan terdaftar.
+   */
+  const handleGasExchange = async (payload: GasExchangePayload) => {
+    const tx: Transaction = {
+      id: `t-tukar-${Date.now()}`,
+      memberId: payload.memberId,
+      type: 'GAS_EXCHANGE',
+      date: payload.date,
+      cost: payload.pricePerUnit * payload.quantity,
+      paymentStatus: 'PAID',
+      quantity: payload.quantity,
+      size: payload.size,
+      gasPrice: payload.pricePerUnit,
+    };
+
+    const { error } = await supabase.from('transactions').insert(tx);
+    if (error) throw new Error(`Gagal mencatat tukar isi: ${error.message}`);
+
+    setTransactions(prev => [...prev, tx]);
   };
 
   /** Regulator sewaan yang dikembalikan: kembali ke stok, lepas dari pemegangnya. */
@@ -550,13 +593,49 @@ const App: React.FC = () => {
     returnCylinderIds: string[],
     totalCost: number,
     isUnpaid: boolean = false,
-    returnRegulatorIds: string[] = []
+    returnRegulatorIds: string[] = [],
+    returnBulkQty: Record<string, number> = {}
   ) => {
     const member = members.find(m => m.id === memberId);
     if (!member) return;
 
     const date = new Date().toISOString();
     const newTransactions: Transaction[] = [];
+
+    // Botol tanpa kode yang dikembalikan: stok toko bertambah lagi, deposit
+    // dikembalikan sebanyak botol yang benar-benar kembali, dan satu baris RETURN
+    // dicatat supaya jumlah yang masih dipegang tetap bisa dihitung dari transaksi.
+    const bulkKembali = Object.entries(returnBulkQty).filter(([, qty]) => qty > 0);
+    if (bulkKembali.length) {
+      let depositDikembalikan = 0;
+
+      for (const [size, qty] of bulkKembali) {
+        const tarif = tariffs.find(t => t.kind === 'CYLINDER' && !t.isCoded && t.size === size);
+        if (!tarif) continue;
+
+        await supabase.from('rental_tariffs')
+          .update({ stockQty: (tarif.stockQty || 0) + qty })
+          .eq('id', tarif.id);
+
+        depositDikembalikan += (Number(tarif.depositAmount) || 0) * qty;
+
+        newTransactions.push({
+          id: `t-ret-curah-${Date.now()}-${size}`,
+          memberId,
+          type: 'RETURN',
+          date,
+          quantity: qty,
+          size: size as CylinderSize,
+          depositAmount: (Number(tarif.depositAmount) || 0) * qty,
+        });
+      }
+
+      if (depositDikembalikan > 0) {
+        const sisaDeposit = Math.max(0, (member.totalDeposit || 0) - depositDikembalikan);
+        await supabase.from('members').update({ totalDeposit: sisaDeposit }).eq('id', memberId);
+        setMembers(prev => prev.map(m => (m.id === memberId ? { ...m, totalDeposit: sisaDeposit } : m)));
+      }
+    }
 
     // Regulator sewaan yang ikut dikembalikan bersama tabung.
     if (returnRegulatorIds.length) {
@@ -684,6 +763,14 @@ const App: React.FC = () => {
               onUpdate={handleUpdateCylinder}
               onDelete={handleDeleteCylinder}
               onRefresh={fetchData}
+            />
+          } />
+          <Route path="/tukar-isi" element={
+            <GasExchangeView
+              tariffs={tariffs}
+              members={members}
+              transactions={transactions}
+              onSubmit={handleGasExchange}
             />
           } />
           <Route path="/rental" element={

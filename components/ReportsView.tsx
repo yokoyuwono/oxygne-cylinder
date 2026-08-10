@@ -1,6 +1,7 @@
-﻿import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Cylinder, Transaction, Member, RefillStation, GasType, CylinderStatus } from '../types';
 import { labelJenisTransaksi, labelStatusBayar } from '../labels';
+import { sebutanBarang } from '../lib/bulkStock';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { supabase } from '../lib/supabase';
 
@@ -117,7 +118,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
   ].filter(d => d.value > 0);
 
   // -- Data Processing: Financials --
-  const incomeTransactions = transactions.filter(t => t.type === 'RENTAL_OUT' && (t.cost || 0) > 0);
+  // Tukar isi juga pendapatan -- kalau hanya RENTAL_OUT yang dihitung, penjualan
+  // gas ke pembeli lepas hilang dari laporan.
+  const incomeTransactions = transactions.filter(
+    t => (t.type === 'RENTAL_OUT' || t.type === 'GAS_EXCHANGE') && (t.cost || 0) > 0
+  );
   const expenseTransactions = transactions.filter(t => t.type === 'REFILL_IN' && (t.cost || 0) > 0);
 
   const totalIncome = incomeTransactions.reduce((sum, t) => sum + (t.cost || 0), 0);
@@ -510,7 +515,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                   <div className="divide-y divide-gray-100">
                       {recentFinancialActivity.length > 0 ? (
                           recentFinancialActivity.map(t => {
-                              const isIncome = t.type === 'RENTAL_OUT';
+                              const isIncome = t.type === 'RENTAL_OUT' || t.type === 'GAS_EXCHANGE';
                               const cyl = cylinders.find(c => c.id === t.cylinderId);
                               const member = members.find(m => m.id === t.memberId);
                               return (
@@ -521,10 +526,14 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                           </div>
                                           <div>
                                               <p className="text-sm font-bold text-gray-800">
-                                                  {isIncome ? `Pendapatan Sewa - ${member?.companyName || 'Tidak diketahui'}` : `Biaya Isi Ulang - ${cyl?.gasType}`}
+                                                  {t.type === 'GAS_EXCHANGE'
+                                                      ? `Tukar Isi - ${member?.companyName || 'pembeli lepas'}`
+                                                      : isIncome
+                                                          ? `Pendapatan Sewa - ${member?.companyName || 'Tidak diketahui'}`
+                                                          : `Biaya Isi Ulang - ${cyl?.gasType}`}
                                               </p>
                                               <p className="text-xs text-gray-500">
-                                                  {new Date(t.date).toLocaleDateString('id-ID')} • {cyl?.serialCode ? `Item: ${cyl.serialCode}` : 'Operasi Batch'}
+                                                  {new Date(t.date).toLocaleDateString('id-ID')} • {sebutanBarang(t, cyl?.serialCode)}
                                               </p>
                                           </div>
                                       </div>

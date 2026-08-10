@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Cylinder, CylinderStatus, GasType, Transaction, Member, RefillStation, MemberStatus } from '../types';
+import { sebutanBarang } from '../lib/bulkStock';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 
@@ -114,22 +115,22 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
 
             switch (tx.type) {
                 case 'RENTAL_OUT':
-                    description = `Menyewakan ${cyl?.gasType} (${cyl?.serialCode}) ke ${member?.companyName}`;
+                    description = `Menyewakan ${sebutanBarang(tx, cyl?.serialCode)} ke ${member?.companyName}`;
                     icon = 'shopping_cart_checkout';
                     colorClass = 'text-blue-600 bg-blue-50';
                     break;
                 case 'RETURN':
-                    description = `Menerima ${cyl?.serialCode} dari ${member?.companyName}`;
+                    description = `Menerima ${sebutanBarang(tx, cyl?.serialCode)} dari ${member?.companyName}`;
                     icon = 'assignment_return';
                     colorClass = 'text-green-600 bg-green-50';
                     break;
                 case 'REFILL_OUT':
-                    description = `Mengirim ${cyl?.serialCode} ke ${station?.name}`;
+                    description = `Mengirim ${sebutanBarang(tx, cyl?.serialCode)} ke ${station?.name}`;
                     icon = 'local_shipping';
                     colorClass = 'text-orange-600 bg-orange-50';
                     break;
                 case 'REFILL_IN':
-                    description = `Menerima kembali ${cyl?.serialCode} dari isi ulang`;
+                    description = `Menerima kembali ${sebutanBarang(tx, cyl?.serialCode)} dari isi ulang`;
                     icon = 'inventory';
                     colorClass = 'text-indigo-600 bg-indigo-50';
                     break;
@@ -144,9 +145,15 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
                     colorClass = 'text-emerald-600 bg-emerald-50';
                     break;
                 case 'DELIVERY':
-                    description = `Mengirim ${cyl?.serialCode} untuk pengiriman`;
+                    description = `Mengirim ${sebutanBarang(tx, cyl?.serialCode)} untuk pengiriman`;
                     icon = 'local_shipping';
                     colorClass = 'text-cyan-600 bg-cyan-50';
+                    break;
+                case 'GAS_EXCHANGE':
+                    // memberId boleh kosong -- tukar isi terbuka untuk pembeli lepas.
+                    description = `Tukar isi ${sebutanBarang(tx)} ${member ? `untuk ${member.companyName}` : '(pembeli lepas)'}`;
+                    icon = 'swap_horiz';
+                    colorClass = 'text-teal-600 bg-teal-50';
                     break;
             }
 

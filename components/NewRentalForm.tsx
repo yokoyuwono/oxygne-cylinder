@@ -2,10 +2,14 @@ import React, { useState, useMemo } from 'react';
 import { Cylinder, CylinderStatus, Member, RentalTariff, Regulator } from '../types';
 
 export interface NewRentalItem {
-  cylinderId: string;
-  serialCode: string;
+  /** Kosong untuk baris curah -- botolnya tidak berkode, jadi tidak ada unit tertentu. */
+  cylinderId?: string;
+  serialCode?: string;
   gasType: string;
   size: string;
+  /** Selalu 1 untuk tabung berkode; bisa lebih untuk stok curah. */
+  quantity: number;
+  /** Nominal PER BOTOL. Total baris = nominal x quantity. */
   depositAmount: number;
   rentalFee: number;
   gasPrice: number;
@@ -63,12 +67,23 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
   const cariTarif = (gasType?: string, size?: string) =>
     tariffs.find(t => t.kind === 'CYLINDER' && t.isActive && t.gasType === gasType && t.size === size);
 
+  // Ukuran tanpa kode: botolnya saling gantikan, jadi dipilih lewat jumlah,
+  // bukan lewat pencarian kode tabung.
+  const tarifCurah = useMemo(
+    () => tariffs.filter(t => t.kind === 'CYLINDER' && t.isActive && !t.isCoded),
+    [tariffs]
+  );
+  const [curahId, setCurahId] = useState('');
+  const [curahQty, setCurahQty] = useState(1);
+
   // Hanya tabung tersedia yang belum masuk keranjang, dan yang tarifnya aktif.
   const hasilCariTabung = useMemo(() => {
     const q = cariTabung.trim().toLowerCase();
     if (!q) return [];
     return cylinders
       .filter(c => c.status === CylinderStatus.Available)
+      // Ukuran tanpa kode tidak boleh muncul di sini walau ada barisnya di cylinders.
+      .filter(c => cariTarif(c.gasType, c.size)?.isCoded !== false)
       .filter(c => !keranjang.some(k => k.cylinderId === c.id))
       .filter(c => c.serialCode.toLowerCase().includes(q) || (c.gasType || '').toLowerCase().includes(q))
       .slice(0, 8);
@@ -101,11 +116,35 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
       serialCode: c.serialCode,
       gasType: c.gasType,
       size: c.size,
+      quantity: 1,
       depositAmount: Number(tarif.depositAmount) || 0,
       rentalFee: Number(tarif.rentalFee) || 0,
       gasPrice: Number(tarif.gasPrice) || 0,
     }]);
     setCariTabung('');
+  };
+
+  /** Tambah botol tanpa kode: satu baris keranjang berjumlah, tanpa unit tertentu. */
+  const tambahCurah = () => {
+    const tarif = tarifCurah.find(t => t.id === curahId);
+    if (!tarif || curahQty < 1) return;
+    setError(null);
+    setKeranjang(prev => {
+      // Gabungkan kalau ukuran yang sama sudah ada, supaya tidak ada baris kembar.
+      const idx = prev.findIndex(k => !k.cylinderId && k.gasType === tarif.gasType && k.size === tarif.size);
+      if (idx >= 0) {
+        return prev.map((k, i) => (i === idx ? { ...k, quantity: k.quantity + curahQty } : k));
+      }
+      return [...prev, {
+        gasType: tarif.gasType as string,
+        size: tarif.size as string,
+        quantity: curahQty,
+        depositAmount: Number(tarif.depositAmount) || 0,
+        rentalFee: Number(tarif.rentalFee) || 0,
+        gasPrice: Number(tarif.gasPrice) || 0,
+      }];
+    });
+    setCurahQty(1);
   };
 
   const ubahItem = (idx: number, patch: Partial<NewRentalItem>) =>
@@ -114,9 +153,10 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
   const hapusItem = (idx: number) => setKeranjang(prev => prev.filter((_, i) => i !== idx));
 
   const total = useMemo(() => {
-    const deposit = keranjang.reduce((s, i) => s + i.depositAmount, 0);
-    const sewa = keranjang.reduce((s, i) => s + i.rentalFee, 0);
-    const gas = keranjang.reduce((s, i) => s + i.gasPrice, 0);
+    // Nominal pada tiap baris berlaku PER BOTOL; baris curah bisa lebih dari satu.
+    const deposit = keranjang.reduce((s, i) => s + i.depositAmount * i.quantity, 0);
+    const sewa = keranjang.reduce((s, i) => s + i.rentalFee * i.quantity, 0);
+    const gas = keranjang.reduce((s, i) => s + i.gasPrice * i.quantity, 0);
     const regSewa = keranjang.reduce((s, i) => s + (i.regulatorFee || 0), 0);
     const regJual = keranjang.reduce((s, i) => s + (i.regulatorSalePrice || 0), 0);
     const pendapatan = sewa + gas + regSewa + regJual;
@@ -268,6 +308,45 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
         <h3 className="font-bold text-gray-800 mb-1">2. Tabung yang Disewa</h3>
         <p className="text-xs text-gray-500 mb-4">Boleh lebih dari satu dan berbeda jenis. Deposit jaminan diakumulasi otomatis.</p>
 
+        {/* Ukuran tanpa kode dipilih lewat jumlah -- botolnya tidak punya kode untuk dicari. */}
+        {tarifCurah.length > 0 && (
+          <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 mb-4">
+            <p className="text-xs font-bold text-amber-800 uppercase mb-2">Tabung tanpa kode</p>
+            <div className="flex flex-col md:flex-row gap-2 md:items-end">
+              <div className="flex-1">
+                <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Jenis &amp; Ukuran</label>
+                <select
+                  value={curahId}
+                  onChange={e => setCurahId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                >
+                  <option value="">-- pilih --</option>
+                  {tarifCurah.map(t => (
+                    <option key={t.id} value={t.id}>{t.gasType} {t.size} &middot; stok {t.stockQty}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="w-full md:w-32">
+                <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Jumlah</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={curahQty}
+                  onChange={e => setCurahQty(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-center font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+              <button
+                onClick={tambahCurah}
+                disabled={!curahId}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white rounded-lg text-sm font-bold whitespace-nowrap"
+              >
+                Tambah
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="relative mb-4">
           <span className="material-icons absolute left-3 top-2.5 text-gray-400 text-sm">search</span>
           <input
@@ -307,10 +386,17 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
         ) : (
           <div className="space-y-3">
             {keranjang.map((it, idx) => (
-              <div key={it.cylinderId} className="border border-gray-200 rounded-xl p-4">
+              <div key={it.cylinderId || `curah-${it.gasType}-${it.size}`} className="border border-gray-200 rounded-xl p-4">
                 <div className="flex justify-between items-start mb-3">
                   <div>
-                    <p className="font-bold text-gray-800 font-mono">{it.serialCode}</p>
+                    {it.cylinderId ? (
+                      <p className="font-bold text-gray-800 font-mono">{it.serialCode}</p>
+                    ) : (
+                      <p className="font-bold text-gray-800 flex items-center gap-2">
+                        {it.quantity} botol
+                        <span className="text-[10px] font-semibold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">tanpa kode</span>
+                      </p>
+                    )}
                     <p className="text-xs text-gray-500">{it.gasType} {it.size}</p>
                   </div>
                   <button onClick={() => hapusItem(idx)} className="text-gray-400 hover:text-red-500">
@@ -320,15 +406,21 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Deposit Jaminan</label>
-                    <p className="text-sm font-mono text-gray-700 py-2">{formatIDR(it.depositAmount)}</p>
+                    <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">
+                      Deposit Jaminan{it.quantity > 1 && <span className="normal-case font-normal"> ({it.quantity}x)</span>}
+                    </label>
+                    <p className="text-sm font-mono text-gray-700 py-2">{formatIDR(it.depositAmount * it.quantity)}</p>
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Biaya Sewa</label>
-                    <p className="text-sm font-mono text-gray-700 py-2">{formatIDR(it.rentalFee)}</p>
+                    <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">
+                      Biaya Sewa{it.quantity > 1 && <span className="normal-case font-normal"> ({it.quantity}x)</span>}
+                    </label>
+                    <p className="text-sm font-mono text-gray-700 py-2">{formatIDR(it.rentalFee * it.quantity)}</p>
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Harga Gas</label>
+                    <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">
+                      Harga Gas{it.quantity > 1 && <span className="normal-case font-normal"> (per botol)</span>}
+                    </label>
                     <input
                       type="number"
                       min={0}
@@ -340,7 +432,8 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
                   </div>
                 </div>
 
-                {tarifRegulator && (
+                {/* Regulator dipasangkan ke unit tertentu, jadi hanya untuk baris berkode. */}
+                {tarifRegulator && it.cylinderId && (
                   <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">

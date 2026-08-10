@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Cylinder, CylinderStatus, Member, MemberPrice, Transaction, GasPrice, RentalTariff, Regulator } from '../types';
 import { supabase } from '../lib/supabase';
 import NewRentalForm, { NewRentalPayload } from './NewRentalForm';
+import { hitungHoldingCurah } from '../lib/bulkStock';
 
 interface RentalFormProps {
     cylinders: Cylinder[];
@@ -12,7 +13,7 @@ interface RentalFormProps {
     transactions: Transaction[];
     tariffs: RentalTariff[];
     regulators: Regulator[];
-    onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean, returnRegulatorIds?: string[]) => void;
+    onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean, returnRegulatorIds?: string[], returnBulkQty?: Record<string, number>) => void;
     onNewRental: (payload: NewRentalPayload) => Promise<void>;
 }
 
@@ -25,6 +26,8 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
     const [cart, setCart] = useState<Cylinder[]>([]);
     const [returnsList, setReturnsList] = useState<string[]>([]); // IDs of cylinders being returned
     const [returnRegulators, setReturnRegulators] = useState<string[]>([]); // IDs of regulators being returned
+    // Berapa botol tanpa kode yang dikembalikan, per ukuran.
+    const [returnBulk, setReturnBulk] = useState<Record<string, number>>({});
     const [error, setError] = useState<string | null>(null);
 
     // -- UI State --
@@ -160,6 +163,10 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
         ? regulators.filter(r => r.status === 'Rented' && (r.memberId === selectedMemberId || milikPelanggan(r.currentHolder)))
         : [];
 
+    // Botol tanpa kode yang dipegang pelanggan. Dihitung dari selisih transaksi,
+    // bukan disimpan, supaya tidak ada angka kembar yang bisa melenceng.
+    const holdingCurah = hitungHoldingCurah(transactions, selectedMemberId);
+
     // --- Helpers ---
 
     const getPrice = (cylinder: Cylinder, memberId: string): { price: number; isCustom: boolean } => {
@@ -219,6 +226,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
         setError(null);
         setReturnsList([]);
         setReturnRegulators([]);
+        setReturnBulk({});
         // Automatically focus scanner after member selection
         setTimeout(() => cylinderInputRef.current?.focus(), 100);
     };
@@ -311,7 +319,8 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
 
     const handleCheckoutClick = () => {
         if (!selectedMemberId) return;
-        if (cart.length === 0 && returnsList.length === 0 && returnRegulators.length === 0) return;
+        const totalCurahKembali = Object.values(returnBulk).reduce((s, n) => s + n, 0);
+        if (cart.length === 0 && returnsList.length === 0 && returnRegulators.length === 0 && totalCurahKembali === 0) return;
         setIsConfirmOpen(true);
     };
 
@@ -320,12 +329,13 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
 
         const totalCost = cart.reduce((sum, item) => sum + getPrice(item, selectedMemberId).price, 0);
 
-        onCompleteRental(selectedMemberId, cart.map(c => c.id), returnsList, totalCost, isUnpaid, returnRegulators);
+        onCompleteRental(selectedMemberId, cart.map(c => c.id), returnsList, totalCost, isUnpaid, returnRegulators, returnBulk);
 
         // Reset
         setCart([]);
         setReturnsList([]);
         setReturnRegulators([]);
+        setReturnBulk({});
         setSelectedMemberId('');
         setSelectedMemberObj(null);
         setMemberQuery('');
@@ -524,6 +534,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         setCart([]);
                         setReturnsList([]);
         setReturnRegulators([]);
+        setReturnBulk({});
                     }}
                     className="px-3 py-1.5 md:px-4 md:py-2 text-xs md:text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors whitespace-nowrap"
                 >
@@ -739,6 +750,51 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                     </div>
                                 </div>
                             )}
+
+                            {/* Botol tanpa kode -- dikembalikan per jumlah, bukan per unit. */}
+                            {holdingCurah.length > 0 && (
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-200 mt-3 overflow-hidden">
+                                    <div className="p-3 md:p-4 border-b border-gray-100 bg-amber-50 flex justify-between items-center">
+                                        <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm md:text-base">
+                                            <span className="material-icons text-amber-500 text-lg">inventory_2</span>
+                                            Botol Tanpa Kode
+                                        </h3>
+                                        <span className="text-xs font-medium text-amber-700 bg-white px-2 py-1 rounded border border-amber-200">
+                                            dipegang pelanggan
+                                        </span>
+                                    </div>
+                                    <div className="p-3 space-y-2">
+                                        {holdingCurah.map(h => {
+                                            const dikembalikan = returnBulk[h.size] || 0;
+                                            const ubah = (n: number) =>
+                                                setReturnBulk(prev => ({ ...prev, [h.size]: Math.min(h.qty, Math.max(0, n)) }));
+                                            return (
+                                                <div key={h.size} className={`p-3 rounded-lg border flex items-center justify-between gap-3 ${dikembalikan > 0 ? 'bg-orange-50 border-orange-300' : 'bg-white border-gray-200'}`}>
+                                                    <div>
+                                                        <p className="font-bold text-sm text-gray-800">Oxygen {h.size}</p>
+                                                        <p className="text-xs text-gray-500">{h.qty} botol dipegang</p>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => ubah(dikembalikan - 1)}
+                                                            className="w-8 h-8 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-600 flex items-center justify-center"
+                                                        >
+                                                            <span className="material-icons text-sm">remove</span>
+                                                        </button>
+                                                        <span className="w-10 text-center font-bold text-gray-800">{dikembalikan}</span>
+                                                        <button
+                                                            onClick={() => ubah(dikembalikan + 1)}
+                                                            className="w-8 h-8 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-600 flex items-center justify-center"
+                                                        >
+                                                            <span className="material-icons text-sm">add</span>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -816,7 +872,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         </div>
                         <button
                             onClick={handleCheckoutClick}
-                            disabled={cart.length === 0 && returnsList.length === 0 && returnRegulators.length === 0}
+                            disabled={cart.length === 0 && returnsList.length === 0 && returnRegulators.length === 0 && Object.values(returnBulk).every(n => !n)}
                             className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white rounded-xl font-bold text-lg shadow-lg transition-all flex justify-center items-center gap-2"
                         >
                             <span>Konfirmasi &amp; Bayar</span>
@@ -835,7 +891,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         </div>
                         <button
                             onClick={handleCheckoutClick}
-                            disabled={cart.length === 0 && returnsList.length === 0 && returnRegulators.length === 0}
+                            disabled={cart.length === 0 && returnsList.length === 0 && returnRegulators.length === 0 && Object.values(returnBulk).every(n => !n)}
                             className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:text-gray-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95"
                         >
                             Konfirmasi

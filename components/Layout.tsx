@@ -92,6 +92,10 @@ const Layout: React.FC<LayoutProps> = ({ children, currentUser, onLogout }) => {
             <span className="material-icons">shopping_cart_checkout</span>
             Sewa Keluar
           </NavLink>
+          <NavLink to="/tukar-isi" className={navLinkClass}>
+            <span className="material-icons">swap_horiz</span>
+            Tukar Isi
+          </NavLink>
           <NavLink to="/delivery" className={navLinkClass}>
             <span className="material-icons">local_shipping</span>
             Pengiriman

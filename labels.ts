@@ -42,6 +42,7 @@ export const JENIS_TRANSAKSI: Record<string, string> = {
   DELIVERY: 'Pengiriman',
   DEBT_PAYMENT: 'Pembayaran Utang',
   DEPOSIT_REFUND: 'Pengembalian Deposit',
+  GAS_EXCHANGE: 'Tukar Isi',
 };
 
 export const STATUS_BAYAR: Record<string, string> = {
