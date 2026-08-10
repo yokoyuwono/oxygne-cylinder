@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect, useCallback } from 'react';
 import { Cylinder, CylinderStatus } from '../types';
 import { supabase } from '../lib/supabase';
@@ -114,7 +114,7 @@ const DeliveryView: React.FC<DeliveryViewProps> = ({ onDeliver }) => {
               <span className="material-icons text-gray-600 text-sm">chevron_left</span>
           </button>
           <span className="text-gray-600 font-medium px-2 text-xs">
-              Page {currentPage} of {totalPages || 1}
+              Halaman {currentPage} dari {totalPages || 1}
           </span>
           <button 
               onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
@@ -131,8 +131,8 @@ const DeliveryView: React.FC<DeliveryViewProps> = ({ onDeliver }) => {
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-           <h2 className="text-2xl font-bold text-gray-800">Delivery Management</h2>
-           <p className="text-gray-500 text-sm">Select cylinders to send out for delivery.</p>
+           <h2 className="text-2xl font-bold text-gray-800">Manajemen Pengiriman</h2>
+           <p className="text-gray-500 text-sm">Pilih tabung yang akan dikirim.</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
             <div className="relative">
@@ -163,7 +163,7 @@ const DeliveryView: React.FC<DeliveryViewProps> = ({ onDeliver }) => {
                   <span className="material-icons absolute left-3 top-2.5 text-gray-400 text-sm">search</span>
                   <input 
                       type="text" 
-                      placeholder="Search available cylinders..."
+                      placeholder="Cari tabung tersedia..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
@@ -172,9 +172,9 @@ const DeliveryView: React.FC<DeliveryViewProps> = ({ onDeliver }) => {
               
               <div className="flex items-center justify-between w-full sm:w-auto gap-4">
                   <div className="flex items-center gap-3 text-sm">
-                      <span className="text-gray-500 hidden sm:inline">Selected: <strong className="text-blue-600">{selectedIds.length}</strong></span>
+                      <span className="text-gray-500 hidden sm:inline">Dipilih: <strong className="text-blue-600">{selectedIds.length}</strong></span>
                       <button onClick={handleSelectPage} className="text-blue-600 hover:text-blue-800 font-medium text-xs sm:text-sm bg-blue-50 px-2 py-1 rounded">
-                          Toggle Page
+                          Pilih Halaman
                       </button>
                   </div>
                   {/* Top Pagination */}
@@ -187,7 +187,7 @@ const DeliveryView: React.FC<DeliveryViewProps> = ({ onDeliver }) => {
               {isLoading ? (
                   <div className="flex flex-col items-center justify-center h-64 text-gray-400">
                       <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"></div>
-                      <p>Loading cylinders...</p>
+                      <p>Memuat tabung...</p>
                   </div>
               ) : serverCylinders.length > 0 ? (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -232,7 +232,7 @@ const DeliveryView: React.FC<DeliveryViewProps> = ({ onDeliver }) => {
               ) : (
                   <div className="flex flex-col items-center justify-center h-64 text-gray-400">
                       <span className="material-icons text-4xl mb-2 text-gray-300">block</span>
-                      <p>No available cylinders found.</p>
+                      <p>Tidak ada tabung tersedia.</p>
                   </div>
               )}
           </div>
@@ -254,7 +254,7 @@ const DeliveryView: React.FC<DeliveryViewProps> = ({ onDeliver }) => {
                   <div className="bg-blue-600 px-6 py-4 flex justify-between items-center text-white">
                       <h3 className="font-bold flex items-center gap-2">
                           <span className="material-icons">local_shipping</span>
-                          Confirm Delivery
+                          Konfirmasi Pengiriman
                       </h3>
                       <button onClick={() => setIsConfirmOpen(false)} className="text-blue-100 hover:text-white">
                           <span className="material-icons">close</span>
@@ -262,15 +262,15 @@ const DeliveryView: React.FC<DeliveryViewProps> = ({ onDeliver }) => {
                   </div>
                   <div className="p-6">
                       <p className="text-gray-600 mb-4">
-                          You are about to mark <strong>{selectedIds.length}</strong> cylinders as <strong>In Delivery</strong>.
+                          Anda akan menandai <strong>{selectedIds.length}</strong> cylinders as <strong>Dalam Pengiriman</strong>.
                       </p>
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-6 text-sm">
                           <div className="flex justify-between mb-1">
-                              <span className="text-gray-500">Date:</span>
-                              <span className="font-medium">{new Date(deliveryDate).toLocaleDateString()}</span>
+                              <span className="text-gray-500">Tanggal:</span>
+                              <span className="font-medium">{new Date(deliveryDate).toLocaleDateString('id-ID')}</span>
                           </div>
                           <div className="flex justify-between">
-                              <span className="text-gray-500">Items:</span>
+                              <span className="text-gray-500">Item:</span>
                               <span className="font-medium">{selectedIds.length}</span>
                           </div>
                       </div>
@@ -279,13 +279,13 @@ const DeliveryView: React.FC<DeliveryViewProps> = ({ onDeliver }) => {
                               onClick={() => setIsConfirmOpen(false)}
                               className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
                           >
-                              Cancel
+                              Batal
                           </button>
                           <button 
                               onClick={handleConfirm}
                               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-md transition-colors"
                           >
-                              Confirm
+                              Konfirmasi
                           </button>
                       </div>
                   </div>

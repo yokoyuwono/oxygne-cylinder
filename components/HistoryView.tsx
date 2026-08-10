@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Cylinder, Transaction, Member, RefillStation } from '../types';
+import { sebutanBarang } from '../lib/bulkStock';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
@@ -69,17 +70,17 @@ const HistoryView: React.FC<HistoryViewProps> = ({ cylinders, members, stations 
             <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
                 <div>
                     <p className="text-sm text-gray-700">
-                        Showing <span className="font-medium">{((page - 1) * ITEMS_PER_PAGE) + 1}</span> to <span className="font-medium">{Math.min(page * ITEMS_PER_PAGE, totalCount)}</span> of <span className="font-medium">{totalCount}</span> results
+                        Menampilkan <span className="font-medium">{((page - 1) * ITEMS_PER_PAGE) + 1}</span> sampai <span className="font-medium">{Math.min(page * ITEMS_PER_PAGE, totalCount)}</span> dari <span className="font-medium">{totalCount}</span> hasil
                     </p>
                 </div>
                 <div>
-                    <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                    <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Navigasi Halaman">
                         <button
                             onClick={() => setPage(p => Math.max(1, p - 1))}
                             disabled={page === 1}
                             className="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            <span className="sr-only">Previous</span>
+                            <span className="sr-only">Sebelumnya</span>
                             <span className="material-icons text-sm">chevron_left</span>
                         </button>
                         {/* Simple Pagination Numbers Logic */}
@@ -109,7 +110,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ cylinders, members, stations 
                             disabled={page === totalPages}
                             className="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            <span className="sr-only">Next</span>
+                            <span className="sr-only">Berikutnya</span>
                             <span className="material-icons text-sm">chevron_right</span>
                         </button>
                     </nav>
@@ -129,7 +130,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ cylinders, members, stations 
                     <span className="material-icons text-gray-600">arrow_back</span>
                 </button>
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-800">Transaction History</h1>
+                    <h1 className="text-2xl font-bold text-gray-800">Riwayat Transaksi</h1>
                     <p className="text-sm text-gray-500">Semua riwayat aktivitas (Server-Side Pagination)</p>
                 </div>
             </div>
@@ -156,39 +157,45 @@ const HistoryView: React.FC<HistoryViewProps> = ({ cylinders, members, stations 
                             // Tentukan tampilan berdasarkan tipe transaksi
                             switch (tx.type) {
                                 case 'RENTAL_OUT':
-                                    description = `Rented ${cyl?.gasType} (${cyl?.serialCode}) to ${member?.companyName}`;
+                                    description = `Menyewakan ${sebutanBarang(tx, cyl?.serialCode)} ke ${member?.companyName}`;
                                     icon = 'shopping_cart_checkout';
                                     colorClass = 'text-blue-600 bg-blue-50';
                                     break;
                                 case 'RETURN':
-                                    description = `Received ${cyl?.serialCode} from ${member?.companyName}`;
+                                    description = `Menerima ${sebutanBarang(tx, cyl?.serialCode)} dari ${member?.companyName}`;
                                     icon = 'assignment_return';
                                     colorClass = 'text-green-600 bg-green-50';
                                     break;
                                 case 'REFILL_OUT':
-                                    description = `Sent ${cyl?.serialCode} to ${station?.name}`;
+                                    description = `Mengirim ${sebutanBarang(tx, cyl?.serialCode)} ke ${station?.name}`;
                                     icon = 'local_shipping';
                                     colorClass = 'text-orange-600 bg-orange-50';
                                     break;
                                 case 'REFILL_IN':
-                                    description = `Restocked ${cyl?.serialCode} from refill`;
+                                    description = `Menerima kembali ${sebutanBarang(tx, cyl?.serialCode)} dari isi ulang`;
                                     icon = 'inventory';
                                     colorClass = 'text-indigo-600 bg-indigo-50';
                                     break;
                                 case 'DEPOSIT_REFUND':
-                                    description = `Refunded deposit to ${member?.companyName}`;
+                                    description = `Mengembalikan deposit ke ${member?.companyName}`;
                                     icon = 'savings';
                                     colorClass = 'text-purple-600 bg-purple-50';
                                     break;
                                 case 'DEBT_PAYMENT':
-                                    description = `Debt payment from ${member?.companyName}`;
+                                    description = `Pembayaran utang dari ${member?.companyName}`;
                                     icon = 'payments';
                                     colorClass = 'text-emerald-600 bg-emerald-50';
                                     break;
                                 case 'DELIVERY':
-                                    description = `Dispatched ${cyl?.serialCode} for delivery`;
+                                    description = `Mengirim ${sebutanBarang(tx, cyl?.serialCode)} untuk pengiriman`;
                                     icon = 'local_shipping';
                                     colorClass = 'text-cyan-600 bg-cyan-50';
+                                    break;
+                                case 'GAS_EXCHANGE':
+                                    // memberId boleh kosong -- tukar isi terbuka untuk pembeli lepas.
+                                    description = `Tukar isi ${sebutanBarang(tx)} ${member ? `untuk ${member.companyName}` : '(pembeli lepas)'}`;
+                                    icon = 'swap_horiz';
+                                    colorClass = 'text-teal-600 bg-teal-50';
                                     break;
                             }
 
@@ -201,11 +208,11 @@ const HistoryView: React.FC<HistoryViewProps> = ({ cylinders, members, stations 
                                         <p className="text-sm font-medium text-gray-800">{description}</p>
                                         <div className="flex justify-between items-center mt-1">
                                             <p className="text-xs text-gray-400">
-                                                {new Date(tx.date).toLocaleDateString()} • {new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                {new Date(tx.date).toLocaleDateString('id-ID')} • {new Date(tx.date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
                                             </p>
                                             {tx.cost && (
                                                 <p className="text-xs font-bold text-gray-600">
-                                                    Rp {tx.cost.toLocaleString()}
+                                                    Rp {tx.cost.toLocaleString('id-ID')}
                                                 </p>
                                             )}
                                         </div>

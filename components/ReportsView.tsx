@@ -1,5 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Cylinder, Transaction, Member, RefillStation, GasType, CylinderStatus } from '../types';
+import { labelJenisTransaksi, labelStatusBayar } from '../labels';
+import { sebutanBarang } from '../lib/bulkStock';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { supabase } from '../lib/supabase';
 
@@ -27,13 +29,13 @@ const DeliveryManifestCard: React.FC<{ date: string, txs: Transaction[], cylinde
                     <span className="material-icons">local_shipping</span>
                 </div>
                 <div>
-                    <h3 className="font-bold text-gray-800">Delivery Manifest</h3>
-                    <p className="text-xs text-cyan-700 font-medium">{new Date(date).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                    <h3 className="font-bold text-gray-800">Manifes Pengiriman</h3>
+                    <p className="text-xs text-cyan-700 font-medium">{new Date(date).toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
                 </div>
             </div>
             <div className="flex items-center gap-3">
                 <span className="bg-white text-cyan-700 px-3 py-1 rounded-full text-sm font-bold shadow-sm border border-cyan-100">
-                    {txs.length} Items
+                    {txs.length} Item
                 </span>
                 <button 
                     className={`w-8 h-8 flex items-center justify-center rounded-full bg-white/50 hover:bg-white text-cyan-700 transition-all duration-200 ${isOpen ? 'rotate-180' : ''}`}
@@ -54,15 +56,15 @@ const DeliveryManifestCard: React.FC<{ date: string, txs: Transaction[], cylinde
                                     {cyl?.gasType.substring(0,3).toUpperCase()}
                                 </div>
                                 <div>
-                                    <p className="font-bold text-sm text-gray-800 font-mono">{cyl?.serialCode || 'Unknown'}</p>
+                                    <p className="font-bold text-sm text-gray-800 font-mono">{cyl?.serialCode || 'Tidak diketahui'}</p>
                                     <div className="flex items-center gap-2 text-xs text-gray-500">
                                         <span>{cyl?.size}</span>
                                         {cyl?.status === CylinderStatus.Delivery ? (
                                             <span className="text-cyan-600 font-medium flex items-center gap-1">
-                                                <span className="w-1.5 h-1.5 rounded-full bg-cyan-500"></span> In Transit
+                                                <span className="w-1.5 h-1.5 rounded-full bg-cyan-500"></span> Dalam Perjalanan
                                             </span>
                                         ) : (
-                                            <span className="text-gray-400">Delivered</span>
+                                            <span className="text-gray-400">Terkirim</span>
                                         )}
                                     </div>
                                 </div>
@@ -108,15 +110,19 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
   }));
 
   const statusDistributionData = [
-      { name: 'Available', value: availableCount, color: '#22c55e' },
-      { name: 'Rented', value: rentedCount, color: '#6366f1' },
-      { name: 'Refill/Empty', value: refillCount, color: '#f59e0b' },
-      { name: 'Delivery', value: deliveryCount, color: '#06b6d4' },
-      { name: 'Damaged', value: cylinders.filter(c => c.status === CylinderStatus.Damaged).length, color: '#ef4444' },
+      { name: 'Tersedia', value: availableCount, color: '#22c55e' },
+      { name: 'Disewa', value: rentedCount, color: '#6366f1' },
+      { name: 'Isi Ulang/Kosong', value: refillCount, color: '#f59e0b' },
+      { name: 'Pengiriman', value: deliveryCount, color: '#06b6d4' },
+      { name: 'Rusak', value: cylinders.filter(c => c.status === CylinderStatus.Damaged).length, color: '#ef4444' },
   ].filter(d => d.value > 0);
 
   // -- Data Processing: Financials --
-  const incomeTransactions = transactions.filter(t => t.type === 'RENTAL_OUT' && (t.cost || 0) > 0);
+  // Tukar isi juga pendapatan -- kalau hanya RENTAL_OUT yang dihitung, penjualan
+  // gas ke pembeli lepas hilang dari laporan.
+  const incomeTransactions = transactions.filter(
+    t => (t.type === 'RENTAL_OUT' || t.type === 'GAS_EXCHANGE') && (t.cost || 0) > 0
+  );
   const expenseTransactions = transactions.filter(t => t.type === 'REFILL_IN' && (t.cost || 0) > 0);
 
   const totalIncome = incomeTransactions.reduce((sum, t) => sum + (t.cost || 0), 0);
@@ -130,7 +136,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
     [...incomeTransactions, ...expenseTransactions].forEach(t => {
         const date = new Date(t.date);
         const key = `${date.getFullYear()}-${date.getMonth()}`;
-        const name = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        const name = date.toLocaleDateString('id-ID', { month: 'short', year: 'numeric' });
         
         if (!monthlyData[key]) {
             monthlyData[key] = { name, Income: 0, Expense: 0, timestamp: date.getTime() };
@@ -157,7 +163,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
 
       return Object.entries(memberRevenue)
           .map(([id, val]) => ({
-              name: members.find(m => m.id === id)?.companyName || 'Unknown',
+              name: members.find(m => m.id === id)?.companyName || 'Tidak diketahui',
               value: val
           }))
           .sort((a, b) => b.value - a.value)
@@ -233,17 +239,17 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
       const cyl = cylinders.find(c => c.id === t.cylinderId);
       const member = members.find(m => m.id === t.memberId);
       const station = stations.find(s => s.id === t.refillStationId);
-      const code = cyl?.serialCode || 'Unknown';
+      const code = cyl?.serialCode || 'Tidak diketahui';
 
       switch(t.type) {
-          case 'RENTAL_OUT': return { title: `Rented ${code}`, subtitle: `To ${member?.companyName}`, icon: 'shopping_cart', color: 'bg-blue-100 text-blue-600', badge: 'RENTAL' };
-          case 'RETURN': return { title: `Returned ${code}`, subtitle: `From ${member?.companyName}`, icon: 'assignment_return', color: 'bg-green-100 text-green-600', badge: 'RETURN' };
-          case 'REFILL_OUT': return { title: `Sent to Refill ${code}`, subtitle: `To ${station?.name}`, icon: 'local_shipping', color: 'bg-orange-100 text-orange-600', badge: 'DISPATCH' };
-          case 'REFILL_IN': return { title: `Restocked ${code}`, subtitle: `Cost: ${t.cost ? formatIDR(t.cost) : '-'}`, icon: 'inventory_2', color: 'bg-indigo-100 text-indigo-600', badge: 'RESTOCK' };
-          case 'DEBT_PAYMENT': return { title: 'Debt Payment', subtitle: `From ${member?.companyName}`, icon: 'payments', color: 'bg-teal-100 text-teal-600', badge: 'PAYMENT' };
-          case 'DEPOSIT_REFUND': return { title: 'Deposit Refund', subtitle: `To ${member?.companyName}`, icon: 'savings', color: 'bg-purple-100 text-purple-600', badge: 'REFUND' };
-          case 'DELIVERY': return { title: `Delivery ${code}`, subtitle: 'In Transit', icon: 'local_shipping', color: 'bg-cyan-100 text-cyan-600', badge: 'DELIVERY' };
-          default: return { title: 'Unknown', subtitle: '', icon: 'help', color: 'bg-gray-100', badge: 'OTHER' };
+          case 'RENTAL_OUT': return { title: `Menyewakan ${code}`, subtitle: `Ke ${member?.companyName}`, icon: 'shopping_cart', color: 'bg-blue-100 text-blue-600', badge: 'SEWA' };
+          case 'RETURN': return { title: `Dikembalikan ${code}`, subtitle: `Dari ${member?.companyName}`, icon: 'assignment_return', color: 'bg-green-100 text-green-600', badge: 'KEMBALI' };
+          case 'REFILL_OUT': return { title: `Kirim Isi Ulang ${code}`, subtitle: `Ke ${station?.name}`, icon: 'local_shipping', color: 'bg-orange-100 text-orange-600', badge: 'KIRIM' };
+          case 'REFILL_IN': return { title: `Diterima Kembali ${code}`, subtitle: `Biaya: ${t.cost ? formatIDR(t.cost) : '-'}`, icon: 'inventory_2', color: 'bg-indigo-100 text-indigo-600', badge: 'TERIMA' };
+          case 'DEBT_PAYMENT': return { title: 'Pembayaran Utang', subtitle: `Dari ${member?.companyName}`, icon: 'payments', color: 'bg-teal-100 text-teal-600', badge: 'BAYAR' };
+          case 'DEPOSIT_REFUND': return { title: 'Pengembalian Deposit', subtitle: `Ke ${member?.companyName}`, icon: 'savings', color: 'bg-purple-100 text-purple-600', badge: 'REFUND' };
+          case 'DELIVERY': return { title: `Pengiriman ${code}`, subtitle: 'Dalam Perjalanan', icon: 'local_shipping', color: 'bg-cyan-100 text-cyan-600', badge: 'ANTAR' };
+          default: return { title: 'Tidak diketahui', subtitle: '', icon: 'help', color: 'bg-gray-100', badge: 'LAIN' };
       }
   };
 
@@ -272,7 +278,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
               <span className="material-icons text-sm">chevron_left</span> Previous
           </button>
           <span className="text-xs font-medium text-gray-500">
-              {isDeliveryLoading ? 'Loading...' : `Page ${deliveryPage} of ${totalDeliveryPages || 1}`}
+              {isDeliveryLoading ? 'Memuat...' : `Halaman ${deliveryPage} dari ${totalDeliveryPages || 1}`}
           </span>
           <button 
               onClick={() => setDeliveryPage(p => Math.min(totalDeliveryPages, p + 1))}
@@ -289,17 +295,17 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-           <h2 className="text-2xl font-bold text-gray-800">Reports & Analytics</h2>
-           <p className="text-gray-500 text-sm">System performance, financial tracking, and audit logs.</p>
+           <h2 className="text-2xl font-bold text-gray-800">Laporan &amp; Analitik</h2>
+           <p className="text-gray-500 text-sm">Kinerja sistem, pelacakan keuangan, dan riwayat aktivitas.</p>
         </div>
         
         {/* Tab Navigation */}
         <div className="flex bg-white rounded-lg p-1 border border-gray-200 w-full md:w-auto overflow-x-auto hide-scrollbar">
             {[
-                { id: 'inventory', label: 'Stock & Usage', icon: 'pie_chart' },
-                { id: 'delivery', label: 'Delivery Report', icon: 'local_shipping' },
-                { id: 'financials', label: 'Financials', icon: 'paid' },
-                { id: 'logs', label: 'Audit Log', icon: 'receipt_long' }
+                { id: 'inventory', label: 'Stok & Pemakaian', icon: 'pie_chart' },
+                { id: 'delivery', label: 'Laporan Pengiriman', icon: 'local_shipping' },
+                { id: 'financials', label: 'Keuangan', icon: 'paid' },
+                { id: 'logs', label: 'Riwayat Aktivitas', icon: 'receipt_long' }
             ].map(tab => (
                 <button
                     key={tab.id}
@@ -323,19 +329,19 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
              {/* KPI Cards */}
              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                    <p className="text-xs text-gray-500 uppercase font-bold">Total Assets</p>
+                    <p className="text-xs text-gray-500 uppercase font-bold">Total Tabung</p>
                     <p className="text-2xl font-bold text-gray-800">{totalCylinders}</p>
                 </div>
                 <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                    <p className="text-xs text-gray-500 uppercase font-bold">Utilization</p>
+                    <p className="text-xs text-gray-500 uppercase font-bold">Pemakaian</p>
                     <p className={`text-2xl font-bold ${utilizationRate > 80 ? 'text-green-600' : 'text-blue-600'}`}>{utilizationRate}%</p>
                 </div>
                 <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                    <p className="text-xs text-gray-500 uppercase font-bold">Rented Out</p>
+                    <p className="text-xs text-gray-500 uppercase font-bold">Disewakan</p>
                     <p className="text-2xl font-bold text-indigo-600">{rentedCount}</p>
                 </div>
                 <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                    <p className="text-xs text-gray-500 uppercase font-bold">Needs Refill</p>
+                    <p className="text-xs text-gray-500 uppercase font-bold">Perlu Isi Ulang</p>
                     <p className="text-2xl font-bold text-orange-500">{refillCount}</p>
                 </div>
              </div>
@@ -343,7 +349,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                  {/* Gas Type Distribution */}
                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                     <h3 className="font-bold text-gray-800 mb-6">Inventory by Gas Type</h3>
+                     <h3 className="font-bold text-gray-800 mb-6">Persediaan per Jenis Gas</h3>
                      <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={gasDistributionData}>
@@ -359,7 +365,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
 
                  {/* Status Distribution */}
                  <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                     <h3 className="font-bold text-gray-800 mb-2">Current Status Breakdown</h3>
+                     <h3 className="font-bold text-gray-800 mb-2">Rincian Status Saat Ini</h3>
                      <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
@@ -396,7 +402,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
             {isDeliveryLoading ? (
                 <div className="p-12 text-center text-gray-400 bg-white rounded-xl border border-gray-200">
                     <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-2"></div>
-                    <p>Loading delivery reports...</p>
+                    <p>Memuat laporan pengiriman...</p>
                 </div>
             ) : deliveryGroups.length > 0 ? (
                 <div className="space-y-4">
@@ -407,7 +413,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
             ) : (
                 <div className="p-12 text-center text-gray-400 bg-white rounded-xl border border-gray-200 border-dashed">
                     <span className="material-icons text-4xl mb-2 text-gray-300">local_shipping</span>
-                    <p>No delivery history found.</p>
+                    <p>Belum ada riwayat pengiriman.</p>
                 </div>
             )}
 
@@ -426,7 +432,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                           <span className="material-icons text-3xl">payments</span>
                       </div>
                       <div>
-                          <p className="text-gray-500 text-sm font-medium uppercase">Total Income</p>
+                          <p className="text-gray-500 text-sm font-medium uppercase">Total Pemasukan</p>
                           <h3 className="text-2xl font-bold text-gray-800">{formatIDR(totalIncome)}</h3>
                       </div>
                   </div>
@@ -436,7 +442,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                           <span className="material-icons text-3xl">trending_down</span>
                       </div>
                       <div>
-                          <p className="text-gray-500 text-sm font-medium uppercase">Total Expenses</p>
+                          <p className="text-gray-500 text-sm font-medium uppercase">Total Pengeluaran</p>
                           <h3 className="text-2xl font-bold text-gray-800">{formatIDR(totalExpenses)}</h3>
                       </div>
                   </div>
@@ -446,7 +452,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                           <span className="material-icons text-3xl">account_balance_wallet</span>
                       </div>
                       <div>
-                          <p className="text-gray-500 text-sm font-medium uppercase">Net Profit</p>
+                          <p className="text-gray-500 text-sm font-medium uppercase">Laba Bersih</p>
                           <h3 className={`text-2xl font-bold ${netProfit >= 0 ? 'text-indigo-700' : 'text-orange-600'}`}>{formatIDR(netProfit)}</h3>
                       </div>
                   </div>
@@ -456,7 +462,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {/* Financial Trends */}
                   <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                      <h3 className="font-bold text-gray-800 mb-6">Financial Performance (Monthly)</h3>
+                      <h3 className="font-bold text-gray-800 mb-6">Kinerja Keuangan (Bulanan)</h3>
                       <div className="h-72">
                           <ResponsiveContainer width="100%" height="100%">
                               <BarChart data={financialTrendData}>
@@ -468,8 +474,8 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                       formatter={(value: number) => formatIDR(value)}
                                   />
                                   <Legend verticalAlign="top" height={36}/>
-                                  <Bar dataKey="Income" fill="#22c55e" radius={[4, 4, 0, 0]} barSize={20} />
-                                  <Bar dataKey="Expense" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
+                                  <Bar dataKey="Income" name="Pemasukan" fill="#22c55e" radius={[4, 4, 0, 0]} barSize={20} />
+                                  <Bar dataKey="Expense" name="Pengeluaran" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
                               </BarChart>
                           </ResponsiveContainer>
                       </div>
@@ -477,7 +483,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
 
                   {/* Top Customers by Revenue */}
                   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                      <h3 className="font-bold text-gray-800 mb-4">Top Revenue Sources</h3>
+                      <h3 className="font-bold text-gray-800 mb-4">Sumber Pendapatan Teratas</h3>
                       {revenueByMemberData.length > 0 ? (
                           <div className="space-y-4">
                               {revenueByMemberData.map((item, idx) => (
@@ -494,7 +500,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                           </div>
                       ) : (
                           <div className="h-40 flex items-center justify-center text-gray-400 text-sm">
-                              No revenue data available.
+                              Belum ada data pendapatan.
                           </div>
                       )}
                   </div>
@@ -503,13 +509,13 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
               {/* Recent Activity List */}
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                   <div className="p-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
-                      <h3 className="font-bold text-gray-800">Recent Financial Transactions</h3>
-                      <button onClick={() => setActiveTab('logs')} className="text-sm text-indigo-600 font-medium hover:underline">View All</button>
+                      <h3 className="font-bold text-gray-800">Transaksi Keuangan Terbaru</h3>
+                      <button onClick={() => setActiveTab('logs')} className="text-sm text-indigo-600 font-medium hover:underline">Lihat Semua</button>
                   </div>
                   <div className="divide-y divide-gray-100">
                       {recentFinancialActivity.length > 0 ? (
                           recentFinancialActivity.map(t => {
-                              const isIncome = t.type === 'RENTAL_OUT';
+                              const isIncome = t.type === 'RENTAL_OUT' || t.type === 'GAS_EXCHANGE';
                               const cyl = cylinders.find(c => c.id === t.cylinderId);
                               const member = members.find(m => m.id === t.memberId);
                               return (
@@ -520,10 +526,14 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                           </div>
                                           <div>
                                               <p className="text-sm font-bold text-gray-800">
-                                                  {isIncome ? `Rental Revenue - ${member?.companyName || 'Unknown'}` : `Refill Expense - ${cyl?.gasType}`}
+                                                  {t.type === 'GAS_EXCHANGE'
+                                                      ? `Tukar Isi - ${member?.companyName || 'pembeli lepas'}`
+                                                      : isIncome
+                                                          ? `Pendapatan Sewa - ${member?.companyName || 'Tidak diketahui'}`
+                                                          : `Biaya Isi Ulang - ${cyl?.gasType}`}
                                               </p>
                                               <p className="text-xs text-gray-500">
-                                                  {new Date(t.date).toLocaleDateString()} • {cyl?.serialCode ? `Item: ${cyl.serialCode}` : 'Batch Operation'}
+                                                  {new Date(t.date).toLocaleDateString('id-ID')} • {sebutanBarang(t, cyl?.serialCode)}
                                               </p>
                                           </div>
                                       </div>
@@ -534,7 +544,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                               )
                           })
                       ) : (
-                          <div className="p-8 text-center text-gray-400 text-sm">No recent transactions.</div>
+                          <div className="p-8 text-center text-gray-400 text-sm">Belum ada transaksi.</div>
                       )}
                   </div>
               </div>
@@ -552,7 +562,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                             value={logFilter}
                             onChange={(e) => setLogFilter(e.target.value)}
                             className="w-full bg-white border border-gray-300 rounded-lg pl-9 pr-4 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                            placeholder="Search log by ID, member, code..."
+                            placeholder="Cari riwayat berdasarkan ID, pelanggan, kode..."
                         />
                   </div>
                   
@@ -561,28 +571,28 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                       onChange={(e) => setSelectedType(e.target.value)}
                       className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white min-w-[140px]"
                   >
-                      <option value="ALL">All Types</option>
-                      <option value="RENTAL_OUT">Rental Out</option>
-                      <option value="RETURN">Return</option>
-                      <option value="REFILL_OUT">Refill Out</option>
-                      <option value="REFILL_IN">Refill In</option>
-                      <option value="DEBT_PAYMENT">Debt Payment</option>
-                      <option value="DEPOSIT_REFUND">Deposit Refund</option>
-                      <option value="DELIVERY">Delivery</option>
+                      <option value="ALL">Semua Jenis</option>
+                      <option value="RENTAL_OUT">Sewa Keluar</option>
+                      <option value="RETURN">Pengembalian</option>
+                      <option value="REFILL_OUT">Kirim Isi Ulang</option>
+                      <option value="REFILL_IN">Terima Isi Ulang</option>
+                      <option value="DEBT_PAYMENT">Pembayaran Utang</option>
+                      <option value="DEPOSIT_REFUND">Pengembalian Deposit</option>
+                      <option value="DELIVERY">Pengiriman</option>
                   </select>
 
                   <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
                     <button 
                         onClick={() => setViewMode('table')}
                         className={`p-1.5 rounded-md flex items-center justify-center transition-all ${viewMode === 'table' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}
-                        title="Table View"
+                        title="Tampilan Tabel"
                     >
                         <span className="material-icons text-xl">table_chart</span>
                     </button>
                     <button 
                         onClick={() => setViewMode('card')}
                         className={`p-1.5 rounded-md flex items-center justify-center transition-all ${viewMode === 'card' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}
-                        title="Card View"
+                        title="Tampilan Kartu"
                     >
                         <span className="material-icons text-xl">grid_view</span>
                     </button>
@@ -597,11 +607,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                 <table className="w-full text-left text-sm">
                                     <thead className="bg-gray-50 border-b border-gray-200">
                                         <tr>
-                                            <th className="px-6 py-3 font-semibold text-gray-700 w-40">Date</th>
-                                            <th className="px-6 py-3 font-semibold text-gray-700 w-32">Type</th>
-                                            <th className="px-6 py-3 font-semibold text-gray-700">Item Details</th>
-                                            <th className="px-6 py-3 font-semibold text-gray-700">Related Party</th>
-                                            <th className="px-6 py-3 font-semibold text-gray-700 text-right">Amount</th>
+                                            <th className="px-6 py-3 font-semibold text-gray-700 w-40">Tanggal</th>
+                                            <th className="px-6 py-3 font-semibold text-gray-700 w-32">Jenis</th>
+                                            <th className="px-6 py-3 font-semibold text-gray-700">Detail Item</th>
+                                            <th className="px-6 py-3 font-semibold text-gray-700">Pihak Terkait</th>
+                                            <th className="px-6 py-3 font-semibold text-gray-700 text-right">Jumlah</th>
                                             <th className="px-6 py-3 font-semibold text-gray-700 text-right">Status</th>
                                         </tr>
                                     </thead>
@@ -613,12 +623,12 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                             return (
                                                 <tr key={t.id} className="hover:bg-gray-50">
                                                     <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
-                                                        <div className="font-medium text-gray-800">{new Date(t.date).toLocaleDateString()}</div>
-                                                        <div className="text-xs">{new Date(t.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                                                        <div className="font-medium text-gray-800">{new Date(t.date).toLocaleDateString('id-ID')}</div>
+                                                        <div className="text-xs">{new Date(t.date).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</div>
                                                     </td>
                                                     <td className="px-6 py-4">
                                                         <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${getTypeBadgeClass(t.type)}`}>
-                                                            {t.type.replace('_', ' ')}
+                                                            {labelJenisTransaksi(t.type)}
                                                         </span>
                                                     </td>
                                                     <td className="px-6 py-4">
@@ -640,7 +650,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                                     <td className="px-6 py-4 text-right">
                                                         {t.paymentStatus ? (
                                                             <span className={`text-xs px-2 py-0.5 rounded font-bold uppercase ${t.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                                {t.paymentStatus}
+                                                                {labelStatusBayar(t.paymentStatus)}
                                                             </span>
                                                         ) : t.rentalDuration ? (
                                                             <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
@@ -670,7 +680,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                     <div className="flex justify-between items-start">
                                         <h4 className="text-sm font-bold text-gray-800 truncate">{info.title}</h4>
                                         <span className="text-xs text-gray-400 whitespace-nowrap ml-2">
-                                            {new Date(t.date).toLocaleDateString()}
+                                            {new Date(t.date).toLocaleDateString('id-ID')}
                                         </span>
                                     </div>
                                     <p className="text-xs text-gray-600 mt-0.5 truncate">{info.subtitle}</p>
@@ -685,7 +695,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                         )}
                                         {t.paymentStatus && (
                                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${t.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                {t.paymentStatus}
+                                                {labelStatusBayar(t.paymentStatus)}
                                             </span>
                                         )}
                                     </div>
@@ -702,7 +712,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                   ) : (
                       <div className="p-12 text-center text-gray-400 bg-white rounded-xl border border-gray-200 border-dashed">
                           <span className="material-icons text-3xl mb-2">search_off</span>
-                          <p>No transactions found matching filter.</p>
+                          <p>Tidak ada transaksi yang cocok dengan filter.</p>
                       </div>
                   )}
               </div>

@@ -1,7 +1,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Cylinder, CylinderStatus, Member, MemberPrice, Transaction, GasPrice } from '../types';
+import { Cylinder, CylinderStatus, Member, MemberPrice, Transaction, GasPrice, RentalTariff } from '../types';
 import { supabase } from '../lib/supabase';
+import NewRentalForm, { NewRentalPayload } from './NewRentalForm';
+import { hitungHoldingCurah, hitungHoldingRegulator } from '../lib/bulkStock';
 
 interface RentalFormProps {
     cylinders: Cylinder[];
@@ -9,14 +11,22 @@ interface RentalFormProps {
     prices: MemberPrice[];
     gasPrices: GasPrice[];
     transactions: Transaction[];
-    onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean) => void;
+    tariffs: RentalTariff[];
+    onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean, returnRegulatorQty?: number, returnBulkQty?: Record<string, number>) => void;
+    onNewRental: (payload: NewRentalPayload) => Promise<void>;
 }
 
-const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gasPrices, transactions, onCompleteRental }) => {
+const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gasPrices, transactions, tariffs, onCompleteRental, onNewRental }) => {
+    // 'existing' = alur lama (sewa/kembali untuk pelanggan terpilih),
+    // 'new' = pendaftaran pelanggan sekaligus sewa pertamanya.
+    const [mode, setMode] = useState<'existing' | 'new'>('existing');
     const [selectedMemberId, setSelectedMemberId] = useState<string>('');
     const [selectedMemberObj, setSelectedMemberObj] = useState<Member | null>(null); // Store selected member object directly
     const [cart, setCart] = useState<Cylinder[]>([]);
     const [returnsList, setReturnsList] = useState<string[]>([]); // IDs of cylinders being returned
+    const [returnRegulatorQty, setReturnRegulatorQty] = useState(0); // Berapa unit regulator sewaan dikembalikan
+    // Berapa botol tanpa kode yang dikembalikan, per ukuran.
+    const [returnBulk, setReturnBulk] = useState<Record<string, number>>({});
     const [error, setError] = useState<string | null>(null);
 
     // -- UI State --
@@ -129,9 +139,36 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
     // Derived Data
     const selectedMember = selectedMemberObj || members.find(m => m.id === selectedMemberId);
 
+    /**
+     * currentHolder dipakai dua cara di data ini: alur sewa lama menulis id
+     * pelanggan, sementara 1.630 baris warisan dan alur Sewa Baru menulis namanya.
+     * Cocokkan keduanya, kalau tidak tabung milik pelanggan lama tidak akan pernah
+     * muncul sebagai barang yang bisa dikembalikan.
+     */
+    const milikPelanggan = (holder?: string) =>
+        Boolean(holder) && (
+            holder === selectedMemberId ||
+            holder === selectedMember?.name ||
+            holder === selectedMember?.companyName
+        );
+
     const memberHeldCylinders = selectedMemberId
-        ? cylinders.filter(c => c.currentHolder === selectedMemberId)
+        ? cylinders.filter(c => milikPelanggan(c.currentHolder))
         : [];
+
+    // Tarif regulator aktif -- sama seperti NewRentalForm, cuma satu yang dipakai.
+    const tarifRegulator = tariffs.find(t => t.kind === 'REGULATOR' && t.isActive);
+
+    // Berapa unit regulator sewaan yang sedang dipegang pelanggan ini, diturunkan
+    // dari transaksi (bukan disimpan) -- yang dibeli sudah jadi milik mereka,
+    // jadi tidak ikut ditagih pengembaliannya.
+    const heldRegulatorQty = selectedMemberId && tarifRegulator
+        ? hitungHoldingRegulator(transactions, selectedMemberId, tarifRegulator.id)
+        : 0;
+
+    // Botol tanpa kode yang dipegang pelanggan. Dihitung dari selisih transaksi,
+    // bukan disimpan, supaya tidak ada angka kembar yang bisa melenceng.
+    const holdingCurah = hitungHoldingCurah(transactions, selectedMemberId);
 
     // --- Helpers ---
 
@@ -160,14 +197,14 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
             .filter(t => t.cylinderId === cylinderId && t.memberId === selectedMemberId && t.type === 'RENTAL_OUT')
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
 
-        if (!lastRentTx) return { days: 0, text: 'Unknown', isLongTerm: false };
+        if (!lastRentTx) return { days: 0, text: 'Tidak diketahui', isLongTerm: false };
 
         const diffMs = new Date().getTime() - new Date(lastRentTx.date).getTime();
         const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
         return {
             days: diffDays,
-            text: diffDays === 0 ? 'Today' : `${diffDays} Day${diffDays > 1 ? 's' : ''}`,
+            text: diffDays === 0 ? 'Hari ini' : `${diffDays} Hari`,
             isLongTerm: diffDays > 30
         };
     };
@@ -191,6 +228,8 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
         setShowMemberMenu(false);
         setError(null);
         setReturnsList([]);
+        setReturnRegulatorQty(0);
+        setReturnBulk({});
         // Automatically focus scanner after member selection
         setTimeout(() => cylinderInputRef.current?.focus(), 100);
     };
@@ -250,7 +289,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
             }
         } catch (err) {
             console.error(err);
-            setError("Error checking cylinder status.");
+            setError("Gagal memeriksa status tabung.");
         } finally {
             setIsSearching(false);
         }
@@ -283,7 +322,8 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
 
     const handleCheckoutClick = () => {
         if (!selectedMemberId) return;
-        if (cart.length === 0 && returnsList.length === 0) return;
+        const totalCurahKembali = Object.values(returnBulk).reduce((s, n) => s + n, 0);
+        if (cart.length === 0 && returnsList.length === 0 && returnRegulatorQty === 0 && totalCurahKembali === 0) return;
         setIsConfirmOpen(true);
     };
 
@@ -292,11 +332,13 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
 
         const totalCost = cart.reduce((sum, item) => sum + getPrice(item, selectedMemberId).price, 0);
 
-        onCompleteRental(selectedMemberId, cart.map(c => c.id), returnsList, totalCost, isUnpaid);
+        onCompleteRental(selectedMemberId, cart.map(c => c.id), returnsList, totalCost, isUnpaid, returnRegulatorQty, returnBulk);
 
         // Reset
         setCart([]);
         setReturnsList([]);
+        setReturnRegulatorQty(0);
+        setReturnBulk({});
         setSelectedMemberId('');
         setSelectedMemberObj(null);
         setMemberQuery('');
@@ -315,6 +357,65 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
 
     // --- RENDER ---
 
+    const tabBar = (
+        <div className="flex justify-center mb-6">
+            <div className="bg-gray-100 p-1.5 rounded-xl flex gap-1 flex-wrap justify-center">
+                <button
+                    onClick={() => { setMode('existing'); setTransactionSource('TOKO'); }}
+                    className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'existing' && transactionSource === 'TOKO' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
+                >
+                    <span className="material-icons text-lg">store</span>
+                    Toko
+                </button>
+                <button
+                    onClick={() => { setMode('existing'); setTransactionSource('DELIVERY'); }}
+                    className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'existing' && transactionSource === 'DELIVERY' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
+                >
+                    <span className="material-icons text-lg">local_shipping</span>
+                    Pengiriman
+                </button>
+                <button
+                    onClick={() => setMode('new')}
+                    className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'new' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
+                >
+                    <span className="material-icons text-lg">person_add</span>
+                    Sewa Baru
+                </button>
+            </div>
+        </div>
+    );
+
+    // MODE: SEWA BARU -- daftarkan pelanggan sekaligus catat sewa pertamanya.
+    if (mode === 'new') {
+        return (
+            <div className="animate-fade-in-up p-1 md:p-4">
+                {feedback && (
+                    <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg z-50 flex items-center gap-2 ${feedback.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+                        <span className="material-icons text-lg">{feedback.type === 'success' ? 'check_circle' : 'error'}</span>
+                        <span className="font-medium text-sm">{feedback.msg}</span>
+                    </div>
+                )}
+                <div className="text-center mb-2">
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">Sewa Baru</h1>
+                    <p className="text-gray-500 mb-6 text-sm">Daftarkan pelanggan sekaligus catat sewa pertamanya.</p>
+                </div>
+                {tabBar}
+                <NewRentalForm
+                    cylinders={cylinders}
+                    members={members}
+                    tariffs={tariffs}
+                    transactions={transactions}
+                    onSubmit={async (payload) => {
+                        await onNewRental(payload);
+                        showFeedback('Sewa baru tersimpan.');
+                        setMode('existing');
+                    }}
+                    onCancel={() => setMode('existing')}
+                />
+            </div>
+        );
+    }
+
     // MODE 1: START (No Member Selected)
     if (!selectedMemberId) {
         return (
@@ -330,27 +431,10 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                     <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6">
                         <span className="material-icons text-3xl">point_of_sale</span>
                     </div>
-                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">New Transaction</h1>
-                    <p className="text-gray-500 mb-8 text-sm md:text-base">Select a customer to begin renting or processing returns.</p>
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">Transaksi Baru</h1>
+                    <p className="text-gray-500 mb-8 text-sm md:text-base">Pilih pelanggan untuk mulai menyewakan atau memproses pengembalian.</p>
 
-                    <div className="flex justify-center mb-6">
-                        <div className="bg-gray-100 p-1.5 rounded-xl flex gap-1">
-                            <button
-                                onClick={() => setTransactionSource('TOKO')}
-                                className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${transactionSource === 'TOKO' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
-                            >
-                                <span className="material-icons text-lg">store</span>
-                                Store (Toko)
-                            </button>
-                            <button
-                                onClick={() => setTransactionSource('DELIVERY')}
-                                className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${transactionSource === 'DELIVERY' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
-                            >
-                                <span className="material-icons text-lg">local_shipping</span>
-                                Delivery
-                            </button>
-                        </div>
-                    </div>
+                    {tabBar}
 
                     <div className="relative text-left">
                         <input
@@ -364,7 +448,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                             onFocus={() => setShowMemberMenu(true)}
                             onBlur={() => setTimeout(() => setShowMemberMenu(false), 200)}
                             onKeyDown={handleMemberKeyDown}
-                            placeholder="Search member..."
+                            placeholder="Cari pelanggan..."
                             className="w-full border-2 border-indigo-100 hover:border-indigo-300 focus:border-indigo-600 rounded-xl pl-12 pr-4 py-4 text-base md:text-lg shadow-sm outline-none transition-all"
                             autoComplete="off"
                             autoFocus
@@ -399,7 +483,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         )}
                         {showMemberMenu && memberSearchResults.length === 0 && !isMemberSearching && debouncedMemberQuery && (
                             <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-gray-100 rounded-xl shadow-lg p-4 text-center z-30">
-                                <p className="text-gray-500">No members found.</p>
+                                <p className="text-gray-500">Pelanggan tidak ditemukan.</p>
                             </div>
                         )}
                     </div>
@@ -452,6 +536,8 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         setDebouncedMemberQuery('');
                         setCart([]);
                         setReturnsList([]);
+                        setReturnRegulatorQty(0);
+                        setReturnBulk({});
                     }}
                     className="px-3 py-1.5 md:px-4 md:py-2 text-xs md:text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors whitespace-nowrap"
                 >
@@ -494,7 +580,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                     disabled={isSearching}
                                     className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white px-4 md:px-8 rounded-xl font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95 text-sm md:text-base"
                                 >
-                                    ADD
+                                    TAMBAH
                                 </button>
                             </div>
 
@@ -554,7 +640,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                             {cart.length === 0 ? (
                                 <div className="text-center p-8 text-gray-400 bg-gray-50 rounded-xl border-dashed border-2 border-gray-200">
                                     <span className="material-icons text-4xl mb-2">shopping_cart</span>
-                                    <p className="text-sm">No items scanned yet.</p>
+                                    <p className="text-sm">Belum ada item yang dipindai.</p>
                                 </div>
                             ) : (
                                 cart.map(item => {
@@ -587,10 +673,10 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                     <div className="p-3 md:p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
                                         <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm md:text-base">
                                             <span className="material-icons text-orange-500">assignment_return</span>
-                                            Available for Return
+                                            Bisa Dikembalikan
                                         </h3>
                                         <span className="text-xs font-medium text-gray-500 bg-white px-2 py-1 rounded border border-gray-200">
-                                            {memberHeldCylinders.length} held
+                                            {memberHeldCylinders.length} dipegang
                                         </span>
                                     </div>
                                     <div className="p-2 grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -627,7 +713,90 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                 </div>
                             ) : (
                                 <div className="p-8 text-center text-gray-400 bg-gray-50 rounded-xl border-dashed border-2 border-gray-200">
-                                    <p className="text-sm">Customer has no items to return.</p>
+                                    <p className="text-sm">Pelanggan tidak punya tabung untuk dikembalikan.</p>
+                                </div>
+                            )}
+
+                            {/* Regulator sewaan -- dikembalikan per jumlah, bukan per unit. Yang dibeli sudah milik pelanggan. */}
+                            {heldRegulatorQty > 0 && (
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-200 mt-3 overflow-hidden">
+                                    <div className="p-3 md:p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                                        <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm md:text-base">
+                                            <span className="material-icons text-gray-400 text-lg">settings_input_component</span>
+                                            Regulator Disewa
+                                        </h3>
+                                        <span className="text-xs font-medium text-gray-500 bg-white px-2 py-1 rounded border border-gray-200">
+                                            {heldRegulatorQty} unit dipegang
+                                        </span>
+                                    </div>
+                                    <div className="p-3">
+                                        <div className={`p-3 rounded-lg border flex items-center justify-between gap-3 ${returnRegulatorQty > 0 ? 'bg-orange-50 border-orange-300' : 'bg-white border-gray-200'}`}>
+                                            <div>
+                                                <p className="font-bold text-sm text-gray-800">{tarifRegulator?.name || 'Regulator'}</p>
+                                                <p className="text-xs text-gray-500">{heldRegulatorQty} unit dipegang</p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    onClick={() => setReturnRegulatorQty(n => Math.max(0, n - 1))}
+                                                    className="w-8 h-8 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-600 flex items-center justify-center"
+                                                >
+                                                    <span className="material-icons text-sm">remove</span>
+                                                </button>
+                                                <span className="w-10 text-center font-bold text-gray-800">{returnRegulatorQty}</span>
+                                                <button
+                                                    onClick={() => setReturnRegulatorQty(n => Math.min(heldRegulatorQty, n + 1))}
+                                                    className="w-8 h-8 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-600 flex items-center justify-center"
+                                                >
+                                                    <span className="material-icons text-sm">add</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Botol tanpa kode -- dikembalikan per jumlah, bukan per unit. */}
+                            {holdingCurah.length > 0 && (
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-200 mt-3 overflow-hidden">
+                                    <div className="p-3 md:p-4 border-b border-gray-100 bg-amber-50 flex justify-between items-center">
+                                        <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm md:text-base">
+                                            <span className="material-icons text-amber-500 text-lg">inventory_2</span>
+                                            Botol Tanpa Kode
+                                        </h3>
+                                        <span className="text-xs font-medium text-amber-700 bg-white px-2 py-1 rounded border border-amber-200">
+                                            dipegang pelanggan
+                                        </span>
+                                    </div>
+                                    <div className="p-3 space-y-2">
+                                        {holdingCurah.map(h => {
+                                            const dikembalikan = returnBulk[h.size] || 0;
+                                            const ubah = (n: number) =>
+                                                setReturnBulk(prev => ({ ...prev, [h.size]: Math.min(h.qty, Math.max(0, n)) }));
+                                            return (
+                                                <div key={h.size} className={`p-3 rounded-lg border flex items-center justify-between gap-3 ${dikembalikan > 0 ? 'bg-orange-50 border-orange-300' : 'bg-white border-gray-200'}`}>
+                                                    <div>
+                                                        <p className="font-bold text-sm text-gray-800">Oxygen {h.size}</p>
+                                                        <p className="text-xs text-gray-500">{h.qty} botol dipegang</p>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => ubah(dikembalikan - 1)}
+                                                            className="w-8 h-8 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-600 flex items-center justify-center"
+                                                        >
+                                                            <span className="material-icons text-sm">remove</span>
+                                                        </button>
+                                                        <span className="w-10 text-center font-bold text-gray-800">{dikembalikan}</span>
+                                                        <button
+                                                            onClick={() => ubah(dikembalikan + 1)}
+                                                            className="w-8 h-8 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-600 flex items-center justify-center"
+                                                        >
+                                                            <span className="material-icons text-sm">add</span>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -637,8 +806,8 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                 {/* RIGHT COLUMN: Receipt / Summary (Hidden on Mobile) */}
                 <div className="hidden lg:flex w-[400px] bg-white rounded-xl shadow-lg border border-gray-200 flex-col shrink-0 overflow-hidden h-full">
                     <div className="p-5 border-b border-dashed border-gray-300 bg-gray-50">
-                        <h2 className="text-lg font-bold text-gray-900 tracking-tight">Transaction Receipt</h2>
-                        <p className="text-xs text-gray-500 mt-1">{new Date().toLocaleString()}</p>
+                        <h2 className="text-lg font-bold text-gray-900 tracking-tight">Struk Transaksi</h2>
+                        <p className="text-xs text-gray-500 mt-1">{new Date().toLocaleString('id-ID')}</p>
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -646,10 +815,10 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         <div>
                             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                                 <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-                                Outgoing Rentals ({cart.length})
+                                Sewa Keluar ({cart.length})
                             </h3>
                             {cart.length === 0 ? (
-                                <p className="text-sm text-gray-400 italic pl-4">No items scanned.</p>
+                                <p className="text-sm text-gray-400 italic pl-4">Belum ada item yang dipindai.</p>
                             ) : (
                                 <div className="space-y-2">
                                     {cart.map(item => {
@@ -667,7 +836,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                                 </div>
                                                 <div className="text-right">
                                                     <p className="font-semibold text-gray-800 text-sm">{formatIDR(price)}</p>
-                                                    {isCustom && <p className="text-[10px] text-green-600 font-medium">Special Rate</p>}
+                                                    {isCustom && <p className="text-[10px] text-green-600 font-medium">Tarif Khusus</p>}
                                                 </div>
                                             </div>
                                         );
@@ -681,13 +850,13 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                             <div className="border-t border-dashed border-gray-200 pt-4">
                                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                                     <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                                    Incoming Returns ({returnsList.length})
+                                    Pengembalian ({returnsList.length})
                                 </h3>
                                 <div className="space-y-2">
                                     {memberHeldCylinders.filter(c => returnsList.includes(c.id)).map(item => (
                                         <div key={item.id} className="flex justify-between items-center text-sm pl-4">
                                             <span className="font-mono text-gray-600">{item.serialCode}</span>
-                                            <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded">RETURN</span>
+                                            <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded">KEMBALI</span>
                                         </div>
                                     ))}
                                 </div>
@@ -698,19 +867,19 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                     {/* DESKTOP TOTALS */}
                     <div className="bg-gray-900 text-white p-6">
                         <div className="flex justify-between items-center mb-2">
-                            <span className="text-gray-400 text-sm">Subtotal Items</span>
+                            <span className="text-gray-400 text-sm">Subtotal Item</span>
                             <span className="font-mono">{cart.length + returnsList.length}</span>
                         </div>
                         <div className="flex justify-between items-end mb-6">
-                            <span className="text-lg font-bold">Total Due</span>
+                            <span className="text-lg font-bold">Total Tagihan</span>
                             <span className="text-3xl font-bold text-green-400">{formatIDR(totalCost)}</span>
                         </div>
                         <button
                             onClick={handleCheckoutClick}
-                            disabled={cart.length === 0 && returnsList.length === 0}
+                            disabled={cart.length === 0 && returnsList.length === 0 && returnRegulatorQty === 0 && Object.values(returnBulk).every(n => !n)}
                             className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white rounded-xl font-bold text-lg shadow-lg transition-all flex justify-center items-center gap-2"
                         >
-                            <span>Confirm & Pay</span>
+                            <span>Konfirmasi &amp; Bayar</span>
                             <span className="material-icons text-sm">arrow_forward</span>
                         </button>
                     </div>
@@ -720,16 +889,16 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                 <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-40 pb-20 md:pb-4">
                     <div className="flex items-center justify-between gap-4">
                         <div>
-                            <p className="text-xs text-gray-500 font-bold uppercase">Total Due</p>
+                            <p className="text-xs text-gray-500 font-bold uppercase">Total Tagihan</p>
                             <p className="text-xl font-bold text-indigo-700">{formatIDR(totalCost)}</p>
                             <p className="text-xs text-gray-400">{cart.length} Rent • {returnsList.length} Return</p>
                         </div>
                         <button
                             onClick={handleCheckoutClick}
-                            disabled={cart.length === 0 && returnsList.length === 0}
+                            disabled={cart.length === 0 && returnsList.length === 0 && returnRegulatorQty === 0 && Object.values(returnBulk).every(n => !n)}
                             className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:text-gray-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95"
                         >
-                            Confirm
+                            Konfirmasi
                         </button>
                     </div>
                 </div>
@@ -743,7 +912,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         <div className="bg-indigo-600 px-6 py-4 flex justify-between items-center text-white">
                             <h3 className="font-bold flex items-center gap-2 text-lg">
                                 <span className="material-icons">receipt_long</span>
-                                Confirm Transaction
+                                Konfirmasi Transaksi
                             </h3>
                             <button onClick={() => setIsConfirmOpen(false)} className="text-indigo-200 hover:text-white transition-colors">
                                 <span className="material-icons">close</span>
@@ -754,7 +923,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         <div className="p-6">
                             {/* Customer Info */}
                             <div className="mb-6 pb-4 border-b border-gray-100 text-center">
-                                <p className="text-gray-400 text-xs uppercase tracking-widest font-bold mb-1">Customer</p>
+                                <p className="text-gray-400 text-xs uppercase tracking-widest font-bold mb-1">Pelanggan</p>
                                 <h4 className="text-xl font-bold text-gray-800">{selectedMember.companyName}</h4>
                                 <p className="text-sm text-gray-500">{selectedMember.name}</p>
                             </div>
@@ -764,7 +933,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                 {cart.length > 0 && (
                                     <div>
                                         <h5 className="text-xs font-bold text-indigo-600 mb-2 flex items-center gap-1">
-                                            <span className="material-icons text-sm">arrow_upward</span> Outgoing ({cart.length})
+                                            <span className="material-icons text-sm">arrow_upward</span> Keluar ({cart.length})
                                         </h5>
                                         <ul className="space-y-1">
                                             {cart.map(item => {
@@ -784,13 +953,13 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                 {returnsList.length > 0 && (
                                     <div className={cart.length > 0 ? "pt-2 border-t border-dashed border-gray-200" : ""}>
                                         <h5 className="text-xs font-bold text-orange-600 mb-2 flex items-center gap-1">
-                                            <span className="material-icons text-sm">arrow_downward</span> Incoming ({returnsList.length})
+                                            <span className="material-icons text-sm">arrow_downward</span> Kembali ({returnsList.length})
                                         </h5>
                                         <ul className="space-y-1">
                                             {memberHeldCylinders.filter(c => returnsList.includes(c.id)).map(item => (
                                                 <li key={item.id} className="flex justify-between text-sm">
                                                     <span className="text-gray-600 font-mono">{item.serialCode}</span>
-                                                    <span className="text-xs bg-orange-100 text-orange-700 px-1.5 rounded">RETURN</span>
+                                                    <span className="text-xs bg-orange-100 text-orange-700 px-1.5 rounded">KEMBALI</span>
                                                 </li>
                                             ))}
                                         </ul>
@@ -801,11 +970,11 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                             {/* Totals */}
                             <div className="bg-gray-50 rounded-lg p-4 border border-gray-100">
                                 <div className="flex justify-between text-sm mb-1">
-                                    <span className="text-gray-500">Rental Subtotal</span>
+                                    <span className="text-gray-500">Subtotal Sewa</span>
                                     <span className="font-semibold text-gray-700">{formatIDR(totalCost)}</span>
                                 </div>
                                 <div className="flex justify-between items-end border-t border-gray-200 pt-2 mt-2">
-                                    <span className="font-bold text-gray-800">Net Total Due</span>
+                                    <span className="font-bold text-gray-800">Total Bersih</span>
                                     <span className="text-2xl font-bold text-indigo-600">{formatIDR(totalCost)}</span>
                                 </div>
                             </div>
@@ -817,7 +986,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                 onClick={() => confirmTransaction(false)}
                                 className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-lg shadow-indigo-200 transition-colors flex items-center justify-center gap-2"
                             >
-                                <span>Pay Now</span>
+                                <span>Bayar Sekarang</span>
                                 <span className="material-icons text-sm">payments</span>
                             </button>
                             {totalCost > 0 && (
@@ -825,7 +994,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                     onClick={() => confirmTransaction(true)}
                                     className="w-full py-3 bg-white border-2 border-orange-500 text-orange-600 hover:bg-orange-50 rounded-lg font-bold transition-colors flex items-center justify-center gap-2"
                                 >
-                                    <span>Pay Later (Debt)</span>
+                                    <span>Bayar Nanti (Utang)</span>
                                     <span className="material-icons text-sm">money_off</span>
                                 </button>
                             )}

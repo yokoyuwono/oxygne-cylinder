@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+﻿import React, { useState, useMemo } from 'react';
 import { Cylinder, CylinderStatus, RefillStation, GasType, RefillPrice, CylinderSize } from '../types';
 
 interface RefillViewProps {
@@ -154,7 +154,7 @@ const RefillView: React.FC<RefillViewProps> = ({
         onSendToRefill(selectedStationId, selectedIds);
         setSelectedIds([]);
         setIsDispatchConfirmOpen(false);
-        showFeedback("Dispatch successful. Cylinders sent to station.");
+        showFeedback("Pengiriman berhasil. Tabung dikirim ke vendor.");
     };
 
     const handleRestockClick = () => {
@@ -168,7 +168,7 @@ const RefillView: React.FC<RefillViewProps> = ({
         setSelectedIds([]);
         setRestockCost('');
         setIsRestockConfirmOpen(false);
-        showFeedback("Restock successful. Inventory updated.");
+        showFeedback("Penerimaan berhasil. Stok diperbarui.");
     };
 
     // Station Modal
@@ -191,7 +191,7 @@ const RefillView: React.FC<RefillViewProps> = ({
 
         if (stationId) {
             onUpdateStation(currentStation as RefillStation);
-            showFeedback("Station updated.");
+            showFeedback("Vendor diperbarui.");
         } else {
             stationId = `rs-${Date.now()}`;
             onAddStation({
@@ -201,7 +201,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                 contactPerson: currentStation.contactPerson || '',
                 phone: currentStation.phone || ''
             });
-            showFeedback("New Station added.");
+            showFeedback("Vendor baru ditambahkan.");
         }
 
         const otherPrices = refillPrices.filter(p => p.stationId !== stationId);
@@ -214,7 +214,7 @@ const RefillView: React.FC<RefillViewProps> = ({
         if (!stationToDelete) return;
         onDeleteStation(stationToDelete.id);
         setStationToDelete(null);
-        showFeedback("Station deleted.", "success");
+        showFeedback("Vendor dihapus.", "success");
     };
 
     // Pricing Logic
@@ -288,17 +288,17 @@ const RefillView: React.FC<RefillViewProps> = ({
             {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h2 className="text-2xl font-bold text-gray-800">Refill Management</h2>
-                    <p className="text-gray-500 text-sm">Track refills, manage vendors, and control costs.</p>
+                    <h2 className="text-2xl font-bold text-gray-800">Manajemen Isi Ulang</h2>
+                    <p className="text-gray-500 text-sm">Pantau isi ulang, kelola vendor, dan kendalikan biaya.</p>
                 </div>
             </div>
 
             {/* Mobile-Friendly Tabs */}
             <div className="border-b border-gray-200 flex gap-4 overflow-x-auto hide-scrollbar">
                 {[
-                    { id: 'dispatch', label: 'Dispatch', icon: 'local_shipping' },
-                    { id: 'restock', label: 'Restock', icon: 'inventory_2' },
-                    { id: 'stations', label: 'Vendors', icon: 'store' }
+                    { id: 'dispatch', label: 'Pengiriman', icon: 'local_shipping' },
+                    { id: 'restock', label: 'Terima Kembali', icon: 'inventory_2' },
+                    { id: 'stations', label: 'Vendor', icon: 'store' }
                 ].map(tab => (
                     <button
                         key={tab.id}
@@ -324,7 +324,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                     <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
                         <div className="flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
                             <div className="w-full md:w-1/2">
-                                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">1. Select Vendor</label>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">1. Pilih Vendor</label>
                                 <div className="relative">
                                     <span className="material-icons absolute left-3 top-3 text-gray-400">store</span>
                                     <select
@@ -332,7 +332,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                         onChange={(e) => { setSelectedStationId(e.target.value); setSelectedIds([]); }}
                                         className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white appearance-none"
                                     >
-                                        <option value="">-- Choose Refill Station --</option>
+                                        <option value="">-- Pilih Stasiun Isi Ulang --</option>
                                         {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                                     </select>
                                     <span className="material-icons absolute right-3 top-3 text-gray-400 pointer-events-none">expand_more</span>
@@ -342,12 +342,12 @@ const RefillView: React.FC<RefillViewProps> = ({
                             {selectedStationId && (
                                 <div className="w-full md:w-auto flex items-center gap-4 bg-gray-50 px-4 py-3 rounded-lg border border-gray-100">
                                     <div>
-                                        <p className="text-xs text-gray-500 uppercase">Compatible Empty</p>
+                                        <p className="text-xs text-gray-500 uppercase">Kosong yang Cocok</p>
                                         <p className="text-xl font-bold text-gray-800">{vendorCompatibleCylinders.length}</p>
                                     </div>
                                     <div className="h-8 w-px bg-gray-300"></div>
                                     <div>
-                                        <p className="text-xs text-gray-500 uppercase">Total Empty</p>
+                                        <p className="text-xs text-gray-500 uppercase">Total Kosong</p>
                                         <p className="text-xl font-bold text-gray-400">{emptyCylinders.length}</p>
                                     </div>
                                 </div>
@@ -362,14 +362,14 @@ const RefillView: React.FC<RefillViewProps> = ({
                                 {/* List Header */}
                                 <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center justify-between sticky top-0 z-10">
                                     <div>
-                                        <h3 className="font-bold text-gray-800 text-sm">2. Select Cylinders to Refill</h3>
-                                        <p className="text-xs text-gray-500">Only showing items compatible with {stations.find(s => s.id === selectedStationId)?.name}</p>
+                                        <h3 className="font-bold text-gray-800 text-sm">2. Pilih Tabung untuk Diisi Ulang</h3>
+                                        <p className="text-xs text-gray-500">Hanya menampilkan tabung yang cocok dengan {stations.find(s => s.id === selectedStationId)?.name}</p>
                                     </div>
                                     <button
                                         onClick={() => handleSelectAll(vendorCompatibleCylinders)}
                                         className="text-sm text-indigo-600 font-medium hover:underline bg-white px-3 py-1 rounded border border-gray-200"
                                     >
-                                        {selectedIds.length === vendorCompatibleCylinders.length && vendorCompatibleCylinders.length > 0 ? 'Deselect All' : 'Select All'}
+                                        {selectedIds.length === vendorCompatibleCylinders.length && vendorCompatibleCylinders.length > 0 ? 'Batal Pilih Semua' : 'Pilih Semua'}
                                     </button>
                                 </div>
 
@@ -383,10 +383,10 @@ const RefillView: React.FC<RefillViewProps> = ({
                                                     <thead className="bg-white border-b border-gray-100 sticky top-0">
                                                         <tr className="text-gray-500 uppercase text-xs tracking-wider">
                                                             <th className="px-6 py-3 w-10"></th>
-                                                            <th className="px-6 py-3">Serial Code</th>
-                                                            <th className="px-6 py-3">Vendor SKU</th>
-                                                            <th className="px-6 py-3">Type / Size</th>
-                                                            <th className="px-6 py-3 text-right">Unit Cost</th>
+                                                            <th className="px-6 py-3">Kode Seri</th>
+                                                            <th className="px-6 py-3">SKU Vendor</th>
+                                                            <th className="px-6 py-3">Jenis / Ukuran</th>
+                                                            <th className="px-6 py-3 text-right">Biaya Satuan</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y divide-gray-50">
@@ -438,8 +438,8 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     ) : (
                                         <div className="flex flex-col items-center justify-center h-64 text-gray-400">
                                             <span className="material-icons text-4xl mb-2 text-gray-300">block</span>
-                                            <p>No compatible empty cylinders found for this vendor.</p>
-                                            <p className="text-xs mt-1">Check vendor pricing and SKU matching.</p>
+                                            <p>Tidak ada tabung kosong yang cocok untuk vendor ini.</p>
+                                            <p className="text-xs mt-1">Periksa harga vendor dan kecocokan SKU.</p>
                                         </div>
                                     )}
                                 </div>
@@ -449,20 +449,20 @@ const RefillView: React.FC<RefillViewProps> = ({
                             <div className="w-full lg:w-80 bg-white rounded-xl shadow-lg border border-gray-200 p-6 flex flex-col h-fit sticky top-6">
                                 <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
                                     <span className="material-icons text-indigo-600 text-sm">summarize</span>
-                                    Dispatch Summary
+                                    Ringkasan Pengiriman
                                 </h3>
 
                                 <div className="space-y-4 mb-6">
                                     <div className="flex justify-between text-sm">
-                                        <span className="text-gray-500">Destination</span>
+                                        <span className="text-gray-500">Tujuan</span>
                                         <span className="font-medium text-gray-800 text-right">{stations.find(s => s.id === selectedStationId)?.name}</span>
                                     </div>
                                     <div className="flex justify-between text-sm">
-                                        <span className="text-gray-500">Items Selected</span>
+                                        <span className="text-gray-500">Item Dipilih</span>
                                         <span className="font-bold text-gray-800">{selectedIds.length}</span>
                                     </div>
                                     <div className="border-t border-gray-100 pt-3 flex justify-between items-end">
-                                        <span className="text-gray-500 text-sm">Estimated Cost</span>
+                                        <span className="text-gray-500 text-sm">Perkiraan Biaya</span>
                                         <span className="font-bold text-xl text-indigo-600">{formatIDR(estimatedCost)}</span>
                                     </div>
                                 </div>
@@ -472,7 +472,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     disabled={selectedIds.length === 0}
                                     className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-all flex justify-center items-center gap-2 shadow-lg shadow-indigo-200"
                                 >
-                                    <span>Dispatch Now</span>
+                                    <span>Kirim Sekarang</span>
                                     <span className="material-icons text-sm">arrow_forward</span>
                                 </button>
                             </div>
@@ -481,7 +481,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                         // Empty State when no vendor selected
                         <div className="flex flex-col items-center justify-center h-64 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl text-gray-400">
                             <span className="material-icons text-4xl mb-2">store</span>
-                            <p>Please select a vendor above to start dispatch.</p>
+                            <p>Pilih vendor di atas untuk mulai pengiriman.</p>
                         </div>
                     )}
                 </div>
@@ -497,15 +497,15 @@ const RefillView: React.FC<RefillViewProps> = ({
                             <div className="flex items-center gap-4 text-sm">
                                 <div className="flex items-center gap-2">
                                     <span className="w-2 h-2 rounded-full bg-yellow-400"></span>
-                                    <span className="text-gray-600">Refilling: <strong>{refillingCylinders.length}</strong></span>
+                                    <span className="text-gray-600">Sedang Diisi: <strong>{refillingCylinders.length}</strong></span>
                                 </div>
                                 <div className="hidden md:flex items-center gap-2">
                                     <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
-                                    <span className="text-gray-600">Selected: <strong>{selectedIds.length}</strong></span>
+                                    <span className="text-gray-600">Dipilih: <strong>{selectedIds.length}</strong></span>
                                 </div>
                             </div>
                             <button onClick={() => handleSelectAll(refillingCylinders)} className="text-sm text-indigo-600 font-medium hover:underline">
-                                {selectedIds.length === refillingCylinders.length && refillingCylinders.length > 0 ? 'Deselect All' : 'Select All'}
+                                {selectedIds.length === refillingCylinders.length && refillingCylinders.length > 0 ? 'Batal Pilih Semua' : 'Pilih Semua'}
                             </button>
                         </div>
 
@@ -518,9 +518,9 @@ const RefillView: React.FC<RefillViewProps> = ({
                                             <thead className="bg-white sticky top-0 shadow-sm z-10">
                                                 <tr className="text-gray-500 uppercase text-xs tracking-wider">
                                                     <th className="px-6 py-3 w-10"></th>
-                                                    <th className="px-6 py-3">Serial Code</th>
-                                                    <th className="px-6 py-3">Type / Size</th>
-                                                    <th className="px-6 py-3">Current Location</th>
+                                                    <th className="px-6 py-3">Kode Seri</th>
+                                                    <th className="px-6 py-3">Jenis / Ukuran</th>
+                                                    <th className="px-6 py-3">Lokasi Saat Ini</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-50">
@@ -553,7 +553,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                             ) : (
                                 <div className="flex flex-col items-center justify-center h-64 text-gray-400 bg-white lg:bg-transparent">
                                     <span className="material-icons text-4xl mb-2 text-gray-300">hourglass_empty</span>
-                                    <p>No cylinders currently out for refill.</p>
+                                    <p>Tidak ada tabung yang sedang diisi ulang.</p>
                                 </div>
                             )}
                         </div>
@@ -564,11 +564,11 @@ const RefillView: React.FC<RefillViewProps> = ({
                         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sticky top-6">
                             <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
                                 <span className="material-icons text-green-600 text-sm">input</span>
-                                Restock Action
+                                Aksi Terima Kembali
                             </h3>
                             <div className="space-y-4">
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Total Batch Cost (IDR)</label>
+                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Total Biaya Batch (Rp)</label>
                                     <input
                                         type="number"
                                         value={restockCost}
@@ -581,7 +581,7 @@ const RefillView: React.FC<RefillViewProps> = ({
 
                                 <div className="bg-green-50 rounded-lg p-4 border border-green-100">
                                     <div className="flex justify-between text-sm">
-                                        <span className="text-green-800">Receiving</span>
+                                        <span className="text-green-800">Penerimaan</span>
                                         <span className="font-bold text-green-900">{selectedIds.length} items</span>
                                     </div>
                                 </div>
@@ -592,7 +592,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     className="w-full py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-all flex justify-center items-center gap-2 shadow-sm"
                                 >
                                     <span className="material-icons text-sm">check_circle</span>
-                                    Confirm Restock
+                                    Konfirmasi Terima Kembali
                                 </button>
                             </div>
                         </div>
@@ -609,7 +609,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                         value={restockCost}
                                         onChange={(e) => setRestockCost(e.target.value)}
                                         className="w-full border border-gray-300 rounded-lg pl-8 pr-3 py-2 text-sm focus:ring-2 focus:ring-green-500 outline-none bg-white"
-                                        placeholder="Total Cost"
+                                        placeholder="Total Biaya"
                                         min="0"
                                     />
                                 </div>
@@ -622,7 +622,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                 disabled={selectedIds.length === 0}
                                 className="w-full py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:text-gray-500 text-white rounded-xl font-bold transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
                             >
-                                <span>Confirm Receipt</span>
+                                <span>Konfirmasi Penerimaan</span>
                                 <span className="material-icons text-sm">check</span>
                             </button>
                         </div>
@@ -648,14 +648,14 @@ const RefillView: React.FC<RefillViewProps> = ({
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                         <h3 className="font-bold text-gray-800 flex items-center gap-2">
                             <span className="material-icons text-gray-400">list</span>
-                            Vendors List
+                            Daftar Vendor
                         </h3>
                         <button
                             onClick={() => handleOpenStationModal()}
                             className="hidden lg:flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm"
                         >
                             <span className="material-icons text-sm">add</span>
-                            Add Vendor
+                            Tambah Vendor
                         </button>
                     </div>
 
@@ -664,10 +664,10 @@ const RefillView: React.FC<RefillViewProps> = ({
                         <table className="w-full text-left text-sm">
                             <thead className="bg-white border-b border-gray-100">
                                 <tr className="text-gray-500 uppercase text-xs tracking-wider">
-                                    <th className="px-6 py-3">Vendor Name</th>
-                                    <th className="px-6 py-3">Contact</th>
-                                    <th className="px-6 py-3">Address</th>
-                                    <th className="px-6 py-3 text-right">Actions</th>
+                                    <th className="px-6 py-3">Nama Vendor</th>
+                                    <th className="px-6 py-3">Kontak</th>
+                                    <th className="px-6 py-3">Alamat</th>
+                                    <th className="px-6 py-3 text-right">Aksi</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
@@ -739,7 +739,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                         <div className="bg-indigo-600 px-6 py-4 flex justify-between items-center text-white">
                             <h3 className="font-bold flex items-center gap-2">
                                 <span className="material-icons">local_shipping</span>
-                                Confirm Dispatch
+                                Konfirmasi Pengiriman
                             </h3>
                             <button onClick={() => setIsDispatchConfirmOpen(false)} className="text-indigo-200 hover:text-white">
                                 <span className="material-icons">close</span>
@@ -751,18 +751,18 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     <span className="material-icons">store</span>
                                 </div>
                                 <div>
-                                    <p className="text-xs text-gray-500 uppercase font-bold mb-0.5">Destination</p>
+                                    <p className="text-xs text-gray-500 uppercase font-bold mb-0.5">Tujuan</p>
                                     <p className="font-bold text-gray-800 text-lg">{stations.find(s => s.id === selectedStationId)?.name}</p>
                                     <p className="text-sm text-gray-600">{stations.find(s => s.id === selectedStationId)?.address}</p>
                                 </div>
                             </div>
 
-                            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Manifest</h4>
+                            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Manifes</h4>
                             <div className="border border-gray-200 rounded-lg overflow-hidden mb-4 max-h-[200px] overflow-y-auto">
                                 <table className="w-full text-sm text-left">
                                     <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-200">
                                         <tr>
-                                            <th className="px-4 py-2 font-normal">Item Description</th>
+                                            <th className="px-4 py-2 font-normal">Keterangan Item</th>
                                             <th className="px-4 py-2 font-normal text-center">Qty</th>
                                             <th className="px-4 py-2 font-normal text-right">Subtotal</th>
                                         </tr>
@@ -783,7 +783,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     </tbody>
                                     <tfoot className="bg-gray-50 font-bold text-gray-800 border-t border-gray-200 sticky bottom-0">
                                         <tr>
-                                            <td colSpan={2} className="px-4 py-3 text-right text-gray-500 font-normal">Total Estimated</td>
+                                            <td colSpan={2} className="px-4 py-3 text-right text-gray-500 font-normal">Total Perkiraan</td>
                                             <td className="px-4 py-3 text-right text-indigo-700">{formatIDR(estimatedCost)}</td>
                                         </tr>
                                     </tfoot>
@@ -795,13 +795,13 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     onClick={() => setIsDispatchConfirmOpen(false)}
                                     className="flex-1 py-3 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
                                 >
-                                    Cancel
+                                    Batal
                                 </button>
                                 <button
                                     onClick={confirmDispatch}
                                     className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold shadow-lg shadow-indigo-200 transition-colors flex items-center justify-center gap-2"
                                 >
-                                    <span>Dispatch</span>
+                                    <span>Pengiriman</span>
                                     <span className="material-icons text-sm">arrow_forward</span>
                                 </button>
                             </div>
@@ -817,7 +817,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                         <div className="bg-green-600 px-6 py-4 flex justify-between items-center text-white">
                             <h3 className="font-bold flex items-center gap-2">
                                 <span className="material-icons">inventory</span>
-                                Confirm Restock
+                                Konfirmasi Terima Kembali
                             </h3>
                             <button onClick={() => setIsRestockConfirmOpen(false)} className="text-green-100 hover:text-white">
                                 <span className="material-icons">close</span>
@@ -825,20 +825,20 @@ const RefillView: React.FC<RefillViewProps> = ({
                         </div>
                         <div className="p-6">
                             <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 mb-6 text-center">
-                                <p className="text-gray-500 text-sm mb-1">Total Cost Incurred</p>
+                                <p className="text-gray-500 text-sm mb-1">Total Biaya Dikeluarkan</p>
                                 <p className="text-3xl font-bold text-gray-800 tracking-tight">{formatIDR(parseFloat(restockCost) || 0)}</p>
                                 {selectedIds.length > 0 && parseFloat(restockCost) > 0 && (
                                     <p className="text-xs text-gray-400 mt-1">Avg: {formatIDR((parseFloat(restockCost) || 0) / selectedIds.length)} / cyl</p>
                                 )}
                             </div>
 
-                            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Items Received</h4>
+                            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Item Diterima</h4>
                             <div className="border border-gray-200 rounded-lg overflow-hidden mb-6 max-h-[200px] overflow-y-auto">
                                 <table className="w-full text-sm text-left">
                                     <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-200">
                                         <tr>
                                             <th className="px-4 py-2 font-normal">Item</th>
-                                            <th className="px-4 py-2 font-normal text-right">Count</th>
+                                            <th className="px-4 py-2 font-normal text-right">Jumlah</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
@@ -860,14 +860,14 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     onClick={() => setIsRestockConfirmOpen(false)}
                                     className="flex-1 py-3 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
                                 >
-                                    Cancel
+                                    Batal
                                 </button>
                                 <button
                                     onClick={confirmRestock}
                                     className="flex-1 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-bold shadow-lg shadow-green-200 transition-colors flex items-center justify-center gap-2"
                                 >
                                     <span className="material-icons text-sm">check</span>
-                                    Confirm
+                                    Konfirmasi
                                 </button>
                             </div>
                         </div>
@@ -882,7 +882,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                         <div className="bg-red-600 px-6 py-4 flex justify-between items-center text-white">
                             <h3 className="font-bold flex items-center gap-2">
                                 <span className="material-icons">warning</span>
-                                Delete Station
+                                Hapus Vendor
                             </h3>
                             <button onClick={() => setStationToDelete(null)} className="text-red-100 hover:text-white">
                                 <span className="material-icons">close</span>
@@ -894,20 +894,20 @@ const RefillView: React.FC<RefillViewProps> = ({
                             </div>
                             <p className="text-gray-800 font-bold text-lg mb-2">Delete {stationToDelete.name}?</p>
                             <p className="text-gray-500 text-sm mb-6">
-                                This action cannot be undone. All associated pricing configurations will be removed.
+                                Tindakan ini tidak bisa dibatalkan. Semua pengaturan harga terkait akan ikut terhapus.
                             </p>
                             <div className="flex justify-center gap-3">
                                 <button
                                     onClick={() => setStationToDelete(null)}
                                     className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
                                 >
-                                    Cancel
+                                    Batal
                                 </button>
                                 <button
                                     onClick={confirmDeleteStation}
                                     className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-bold shadow-md shadow-red-200 transition-colors"
                                 >
-                                    Yes, Delete
+                                    Ya, Hapus
                                 </button>
                             </div>
                         </div>
@@ -927,21 +927,21 @@ const RefillView: React.FC<RefillViewProps> = ({
                         </div>
                         <form onSubmit={handleSaveStation} className="p-6 space-y-6">
                             <div className="space-y-4">
-                                <h4 className="font-bold text-xs text-gray-400 uppercase tracking-wider">Vendor Details</h4>
+                                <h4 className="font-bold text-xs text-gray-400 uppercase tracking-wider">Detail Vendor</h4>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Nama Perusahaan</label>
                                     <input
                                         type="text"
                                         required
                                         value={currentStation.name || ''}
                                         onChange={(e) => setCurrentStation({ ...currentStation, name: e.target.value })}
                                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                                        placeholder="e.g. Aneka Gas"
+                                        placeholder="mis. Aneka Gas"
                                     />
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Contact Name</label>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Nama Narahubung</label>
                                         <input
                                             type="text"
                                             value={currentStation.contactPerson || ''}
@@ -950,7 +950,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Telepon</label>
                                         <input
                                             type="text"
                                             value={currentStation.phone || ''}
@@ -960,7 +960,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Full Address</label>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Alamat Lengkap</label>
                                     <textarea
                                         value={currentStation.address || ''}
                                         onChange={(e) => setCurrentStation({ ...currentStation, address: e.target.value })}
@@ -972,18 +972,18 @@ const RefillView: React.FC<RefillViewProps> = ({
 
                             <div className="space-y-3">
                                 <div className="flex justify-between items-center">
-                                    <h4 className="font-bold text-xs text-gray-400 uppercase tracking-wider">Refill Pricing</h4>
+                                    <h4 className="font-bold text-xs text-gray-400 uppercase tracking-wider">Harga Isi Ulang</h4>
                                     <button
                                         type="button"
                                         onClick={addPriceRow}
                                         className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
                                     >
-                                        <span className="material-icons text-sm">add_circle</span> Add Rate
+                                        <span className="material-icons text-sm">add_circle</span> Tambah Tarif
                                     </button>
                                 </div>
                                 <div className="bg-gray-50 rounded-xl p-4 space-y-3 border border-gray-100">
                                     {editingPrices.length === 0 ? (
-                                        <p className="text-xs text-center text-gray-400 py-2">No custom rates configured.</p>
+                                        <p className="text-xs text-center text-gray-400 py-2">Belum ada tarif khusus.</p>
                                     ) : (
                                         editingPrices.map((price, idx) => (
                                             <div key={idx} className="flex gap-2 items-center flex-wrap sm:flex-nowrap">
@@ -1009,14 +1009,14 @@ const RefillView: React.FC<RefillViewProps> = ({
                                                         value={price.serialCode || ''}
                                                         onChange={(e) => updatePriceRow(idx, 'serialCode', e.target.value)}
                                                         className="w-full text-xs border-gray-300 rounded-lg px-2 py-2 outline-none focus:border-indigo-500 border uppercase font-mono"
-                                                        placeholder="Code/SKU (Optional)"
+                                                        placeholder="Kode/SKU (opsional)"
                                                     />
                                                     <input
                                                         type="number"
                                                         value={price.price}
                                                         onChange={(e) => updatePriceRow(idx, 'price', parseFloat(e.target.value))}
                                                         className="w-24 text-xs border-gray-300 rounded-lg px-2 py-2 outline-none focus:border-indigo-500 border"
-                                                        placeholder="Cost"
+                                                        placeholder="Biaya"
                                                     />
                                                 </div>
                                                 <button type="button" onClick={() => removePriceRow(idx)} className="text-gray-400 hover:text-red-500 p-1">
@@ -1034,13 +1034,13 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     onClick={() => setIsStationModalOpen(false)}
                                     className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
                                 >
-                                    Cancel
+                                    Batal
                                 </button>
                                 <button
                                     type="submit"
                                     className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold shadow-md transition-colors"
                                 >
-                                    Save Details
+                                    Simpan Detail
                                 </button>
                             </div>
                         </form>

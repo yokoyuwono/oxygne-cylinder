@@ -31,7 +31,8 @@ export enum CylinderStatus {
   // Tabung yang posisinya tidak diketahui -- warisan pencatatan yang tidak
   // dijalankan. Bukan bagian dari armada yang bisa disewakan, jadi dikecualikan
   // dari perhitungan utilisasi dan stok di Dashboard.
-  Unknown = 'Tidak Diketahui',
+  // Nilainya Inggris seperti status lain; labelnya diterjemahkan di labels.ts.
+  Unknown = 'Unknown',
 }
 
 export enum CylinderSize {
@@ -121,12 +122,77 @@ export interface Transaction {
   cylinderId?: string; // Optional for DEBT_PAYMENT
   memberId?: string;
   refillStationId?: string; // For refill transactions
-  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEPOSIT_REFUND' | 'DELIVERY';
+  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEPOSIT_REFUND' | 'DELIVERY' | 'GAS_EXCHANGE';
   date: string;
   rentalDuration?: number; // Days held (relevant for RETURN type)
-  cost?: number; // Cost of refill or rental
+  cost?: number; // Revenue only -- rental fee + gas + regulator. Deposit is NOT included.
   paymentStatus?: 'PAID' | 'UNPAID';
   relatedTransactionIds?: string[]; // IDs of transactions paid by this DEBT_PAYMENT
+
+  // Breakdown captured at the moment of the transaction. These are copies, not
+  // lookups: editing a tariff later must never rewrite past figures.
+  depositAmount?: number;      // Security deposit taken -- a liability, not income
+  rentalFee?: number;          // One-off cylinder rental charge
+  gasPrice?: number;           // Charge for the gas itself
+  regulatorFee?: number;       // Regulator rental charge
+  regulatorSalePrice?: number; // Regulator sale price
+  regulatorTariffId?: string;  // Which regulator tariff this rental/sale/return refers to
+  regulatorQty?: number;       // How many regulator units in this line (rent, sale, or return)
+
+  // Baris stok curah tidak punya cylinderId -- botolnya tidak berkode dan tidak
+  // bisa dibedakan satu sama lain, jadi ukurannya disimpan langsung di sini.
+  quantity?: number;
+  size?: CylinderSize;
+}
+
+/**
+ * Master data tarif penyewaan -- harga standar yang bisa diubah lewat halaman
+ * Master Data tanpa deploy ulang.
+ *
+ * Baris CYLINDER memakai gasType + size; baris REGULATOR memakai name. Saat sewa
+ * dicatat, nominalnya disalin ke baris transaksi supaya riwayat tidak ikut berubah
+ * ketika tarif diperbarui.
+ */
+export interface RentalTariff {
+  id: string;
+  kind: 'CYLINDER' | 'REGULATOR';
+  name?: string;
+  gasType?: GasType;
+  size?: CylinderSize;
+  depositAmount: number;
+  rentalFee: number;
+  gasPrice: number;
+  salePrice: number;
+  isActive: boolean;
+  createdAt?: string;
+
+  /**
+   * Ukuran ini dilacak per unit (punya kode di tabungnya) atau sebagai stok curah.
+   * Tabung 1m3 tidak berkode -- botolnya saling gantikan, jadi tidak bisa
+   * diperlakukan sebagai aset bernama.
+   */
+  isCoded: boolean;
+
+  /**
+   * Jumlah botol yang dimiliki toko, hanya berlaku saat isCoded = false.
+   *
+   * Ini angka KEPEMILIKAN, bukan kesiapan. Tukar isi tidak menggerakkannya sama
+   * sekali karena botol masuk satu dan keluar satu; yang menggerakkan hanya botol
+   * yang pergi atau kembali permanen.
+   */
+  stockQty: number;
+
+  /**
+   * Stok regulator, hanya berlaku saat kind = 'REGULATOR'. Regulator tidak
+   * dilacak per unit -- hanya dua angka kepemilikan.
+   *
+   * regulatorNewStock berkurang saat terjual (state permanen). regulatorUsedStock
+   * TIDAK bergerak saat disewa/dikembalikan -- yang sedang beredar diturunkan dari
+   * riwayat transaksi (lihat hitungHoldingRegulator di lib/bulkStock.ts), bukan
+   * disimpan sebagai kolom yang diubah manual.
+   */
+  regulatorNewStock: number;
+  regulatorUsedStock: number;
 }
 
 // Chat types

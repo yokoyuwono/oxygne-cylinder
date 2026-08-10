@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
-import CylinderList from './components/CylinderList';
+import InventoryView from './components/InventoryView';
 import MembersView from './components/MembersView';
 import ChatBot from './components/ChatBot';
 import RentalForm from './components/RentalForm';
@@ -13,7 +13,10 @@ import ReportsView from './components/ReportsView';
 import Login from './components/Login';
 import AdminView from './components/AdminView';
 import HistoryView from './components/HistoryView';
-import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice } from './types';
+import MasterDataView from './components/MasterDataView';
+import GasExchangeView, { GasExchangePayload } from './components/GasExchangeView';
+import { NewRentalPayload } from './components/NewRentalForm';
+import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff } from './types';
 import { supabase, isSupabaseConfigured, fetchAllRecords } from './lib/supabase';
 
 const App: React.FC = () => {
@@ -25,19 +28,19 @@ const App: React.FC = () => {
           <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
             <span className="material-icons text-3xl">settings_alert</span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">Configuration Required</h1>
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">Konfigurasi Diperlukan</h1>
           <p className="text-gray-500 mb-6">
-            The application cannot connect to Supabase. Please set up your environment variables to continue.
+            Aplikasi tidak bisa terhubung ke Supabase. Atur variabel lingkungan terlebih dahulu untuk melanjutkan.
           </p>
 
           <div className="bg-slate-900 rounded-lg p-4 text-left overflow-x-auto mb-6">
-            <p className="text-slate-400 text-xs uppercase font-bold mb-2">.env / Environment Variables</p>
+            <p className="text-slate-400 text-xs uppercase font-bold mb-2">.env / Variabel Lingkungan</p>
             <code className="text-green-400 text-sm font-mono block mb-1">VITE_SUPABASE_URL=your_project_url</code>
             <code className="text-green-400 text-sm font-mono block">VITE_SUPABASE_ANON_KEY=your_anon_key</code>
           </div>
 
           <p className="text-sm text-gray-400">
-            If you are running this locally, create a <span className="font-mono bg-gray-100 px-1 rounded">.env</span> file in the project root.
+            Kalau menjalankan secara lokal, buat berkas <span className="font-mono bg-gray-100 px-1 rounded">.env</span> di folder utama proyek.
           </p>
         </div>
       </div>
@@ -57,6 +60,7 @@ const App: React.FC = () => {
   const [refillStations, setRefillStations] = useState<RefillStation[]>([]);
   const [refillPrices, setRefillPrices] = useState<RefillPrice[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]); // For Admin View
+  const [tariffs, setTariffs] = useState<RentalTariff[]>([]);
 
   // -- 1. FETCH INITIAL DATA --
   const fetchData = async () => {
@@ -70,7 +74,8 @@ const App: React.FC = () => {
         gpData,
         rsData,
         rpData,
-        prData
+        prData,
+        rtData
       ] = await Promise.all([
         fetchAllRecords<Cylinder>('cylinders'),
         fetchAllRecords<Member>('members'),
@@ -79,7 +84,8 @@ const App: React.FC = () => {
         fetchAllRecords<GasPrice>('refill_prices'),
         fetchAllRecords<RefillStation>('refill_stations'),
         fetchAllRecords<RefillPrice>('refill_prices'),
-        fetchAllRecords<AppUser>('profiles')
+        fetchAllRecords<AppUser>('profiles'),
+        fetchAllRecords<RentalTariff>('rental_tariffs')
       ]);
 
       if (cylData) setCylinders(cylData);
@@ -90,6 +96,7 @@ const App: React.FC = () => {
       if (rsData) setRefillStations(rsData);
       if (rpData) setRefillPrices(rpData);
       if (prData) setUsers(prData);
+      if (rtData) setTariffs(rtData);
 
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -165,7 +172,7 @@ const App: React.FC = () => {
   // -- User CRUD Handlers (Admin Only) --
   const handleAddUser = async (user: AppUser) => {
     // In real app: Call Cloud Function to create Supabase Auth User
-    alert("Please use Supabase Dashboard to create new Auth Users.");
+    alert("Gunakan Dashboard Supabase untuk membuat akun pengguna baru.");
   };
   const handleUpdateUser = async (user: AppUser) => {
     const { error } = await supabase.from('profiles').update({ role: user.role, name: user.name }).eq('id', user.id);
@@ -406,19 +413,232 @@ const App: React.FC = () => {
     setTransactions(prev => [...prev, ...newTransactions]);
   };
 
+  /**
+   * Sewa baru: daftarkan pelanggan (atau pakai yang sudah ada) sekaligus catat
+   * sewa pertamanya, termasuk deposit jaminan dan regulator.
+   *
+   * Nominal tarif sudah disalin ke tiap item oleh form, jadi yang tersimpan di
+   * transaksi adalah angka saat itu -- mengubah master data nanti tidak akan
+   * menulis ulang riwayat ini.
+   *
+   * cost sengaja hanya berisi pendapatan (sewa + gas + regulator). Deposit masuk
+   * kolom depositAmount supaya Laporan Keuangan tidak melaporkan titipan sebagai laba.
+   */
+  const handleNewRental = async (payload: NewRentalPayload) => {
+    const { isNewMember, member, rentalDate, items, totals } = payload;
+
+    // -- 1. Pelanggan --
+    let memberId = member.id || '';
+
+    if (isNewMember) {
+      memberId = `m-${Date.now()}`;
+      const baru: Member & { ktp?: string } = {
+        id: memberId,
+        name: member.name,
+        companyName: member.name,
+        address: member.address,
+        phone: member.phone,
+        ktp: member.ktp,
+        totalDeposit: totals.deposit,
+        totalDebt: 0,
+        joinDate: rentalDate,
+        status: MemberStatus.Active,
+      };
+      const { error } = await supabase.from('members').insert(baru);
+      if (error) {
+        // Index unik parsial pada ktp: nomor yang sama tidak boleh didaftarkan dua kali.
+        throw new Error(
+          error.code === '23505'
+            ? `KTP ${member.ktp} sudah terdaftar atas pelanggan lain.`
+            : `Gagal menyimpan pelanggan: ${error.message}`
+        );
+      }
+    } else {
+      const lama = members.find(m => m.id === memberId);
+      const depositBaru = (lama?.totalDeposit || 0) + totals.deposit;
+      const { error } = await supabase.from('members').update({ totalDeposit: depositBaru }).eq('id', memberId);
+      if (error) throw new Error(`Gagal memperbarui deposit pelanggan: ${error.message}`);
+    }
+
+    // -- 2. Harga gas jadi harga tetap pelanggan --
+    // Satu baris per kombinasi jenis gas + ukuran; kalau pelanggan menyewa dua
+    // tabung sejenis, harga terakhir yang dipakai.
+    const hargaUnik = new Map<string, { gasType: string; size: string; price: number }>();
+    items.forEach(i => hargaUnik.set(`${i.gasType}|${i.size}`, { gasType: i.gasType, size: i.size, price: i.gasPrice }));
+
+    const barisHarga = [...hargaUnik.values()].map((h, idx) => ({
+      id: `mp-${Date.now()}-${idx}`,
+      memberId,
+      gasType: h.gasType,
+      size: h.size,
+      price: h.price,
+    }));
+
+    for (const baris of barisHarga) {
+      const adaLama = memberPrices.find(
+        p => p.memberId === memberId && p.gasType === baris.gasType && p.size === baris.size
+      );
+      if (adaLama) {
+        await supabase.from('member_prices').update({ price: baris.price }).eq('id', adaLama.id);
+      } else {
+        await supabase.from('member_prices').insert(baris);
+      }
+    }
+
+    // -- 3. Tabung berkode berpindah ke pelanggan --
+    const cylinderIds = items.map(i => i.cylinderId).filter(Boolean) as string[];
+    if (cylinderIds.length) {
+      const { error: errCyl } = await supabase.from('cylinders').update({
+        status: CylinderStatus.Rented,
+        currentHolder: member.name,
+        lastLocation: member.name,
+      }).in('id', cylinderIds);
+      if (errCyl) throw new Error(`Gagal memperbarui status tabung: ${errCyl.message}`);
+    }
+
+    // -- 3b. Botol tanpa kode: kurangi jumlah stok yang dimiliki toko --
+    // Botolnya pergi bersama pelanggan, jadi kepemilikan toko berkurang. Berbeda
+    // dengan tukar isi, yang tidak menggerakkan angka ini sama sekali.
+    for (const item of items.filter(i => !i.cylinderId)) {
+      const tarif = tariffs.find(t => t.kind === 'CYLINDER' && t.gasType === item.gasType && t.size === item.size);
+      if (!tarif) continue;
+      const sisa = Math.max(0, (tarif.stockQty || 0) - item.quantity);
+      const { error } = await supabase.from('rental_tariffs').update({ stockQty: sisa }).eq('id', tarif.id);
+      if (error) throw new Error(`Gagal memperbarui stok ${item.gasType} ${item.size}: ${error.message}`);
+    }
+
+    // -- 4. Regulator terjual: kepemilikan stok baru berkurang permanen --
+    // Regulator sewaan TIDAK menyentuh regulatorUsedStock -- itu perputaran,
+    // bukan kepemilikan; yang sedang beredar diturunkan dari transaksi.
+    const regulatorTerjual = items.filter(i => i.regulatorSold && i.regulatorTariffId);
+    for (const item of regulatorTerjual) {
+      const tarif = tariffs.find(t => t.id === item.regulatorTariffId);
+      if (!tarif) continue;
+      const sisa = Math.max(0, (tarif.regulatorNewStock || 0) - 1);
+      const { error } = await supabase.from('rental_tariffs').update({ regulatorNewStock: sisa }).eq('id', tarif.id);
+      if (error) throw new Error(`Gagal memperbarui stok regulator baru: ${error.message}`);
+    }
+
+    // -- 5. Transaksi, satu per tabung, rincian dibekukan --
+    // Nominal pada item berlaku per botol; baris curah dikalikan jumlahnya.
+    const newTransactions: Transaction[] = items.map((i, idx) => ({
+      id: `t-new-${Date.now()}-${idx}`,
+      cylinderId: i.cylinderId,
+      memberId,
+      type: 'RENTAL_OUT',
+      date: rentalDate,
+      cost: (i.rentalFee + i.gasPrice) * i.quantity + (i.regulatorFee || 0) + (i.regulatorSalePrice || 0),
+      paymentStatus: 'PAID',
+      depositAmount: i.depositAmount * i.quantity,
+      rentalFee: i.rentalFee * i.quantity,
+      gasPrice: i.gasPrice * i.quantity,
+      regulatorFee: i.regulatorFee,
+      regulatorSalePrice: i.regulatorSalePrice,
+      regulatorTariffId: i.regulatorTariffId,
+      regulatorQty: i.regulatorTariffId ? 1 : undefined,
+      quantity: i.quantity,
+      size: i.size as CylinderSize,
+    }));
+
+    const { error: errTx } = await supabase.from('transactions').insert(newTransactions);
+    if (errTx) throw new Error(`Gagal mencatat transaksi: ${errTx.message}`);
+
+    await fetchData();
+  };
+
+  /**
+   * Tukar isi tabung tanpa kode.
+   *
+   * Tidak menyentuh stok sama sekali: botol masuk satu, keluar satu, jadi jumlah
+   * kepemilikan toko tetap. Yang dicatat hanya pendapatan gasnya. memberId boleh
+   * kosong -- siapa pun boleh menukar isi, tidak harus pelanggan terdaftar.
+   */
+  const handleGasExchange = async (payload: GasExchangePayload) => {
+    const tx: Transaction = {
+      id: `t-tukar-${Date.now()}`,
+      memberId: payload.memberId,
+      type: 'GAS_EXCHANGE',
+      date: payload.date,
+      cost: payload.pricePerUnit * payload.quantity,
+      paymentStatus: 'PAID',
+      quantity: payload.quantity,
+      size: payload.size,
+      gasPrice: payload.pricePerUnit,
+    };
+
+    const { error } = await supabase.from('transactions').insert(tx);
+    if (error) throw new Error(`Gagal mencatat tukar isi: ${error.message}`);
+
+    setTransactions(prev => [...prev, tx]);
+  };
+
   // Handler for rental transactions (Rentals AND Returns)
   const handleRental = async (
     memberId: string,
     rentCylinderIds: string[],
     returnCylinderIds: string[],
     totalCost: number,
-    isUnpaid: boolean = false
+    isUnpaid: boolean = false,
+    returnRegulatorQty: number = 0,
+    returnBulkQty: Record<string, number> = {}
   ) => {
     const member = members.find(m => m.id === memberId);
     if (!member) return;
 
     const date = new Date().toISOString();
     const newTransactions: Transaction[] = [];
+
+    // Botol tanpa kode yang dikembalikan: stok toko bertambah lagi, deposit
+    // dikembalikan sebanyak botol yang benar-benar kembali, dan satu baris RETURN
+    // dicatat supaya jumlah yang masih dipegang tetap bisa dihitung dari transaksi.
+    const bulkKembali = Object.entries(returnBulkQty).filter(([, qty]) => qty > 0);
+    if (bulkKembali.length) {
+      let depositDikembalikan = 0;
+
+      for (const [size, qty] of bulkKembali) {
+        const tarif = tariffs.find(t => t.kind === 'CYLINDER' && !t.isCoded && t.size === size);
+        if (!tarif) continue;
+
+        await supabase.from('rental_tariffs')
+          .update({ stockQty: (tarif.stockQty || 0) + qty })
+          .eq('id', tarif.id);
+
+        depositDikembalikan += (Number(tarif.depositAmount) || 0) * qty;
+
+        newTransactions.push({
+          id: `t-ret-curah-${Date.now()}-${size}`,
+          memberId,
+          type: 'RETURN',
+          date,
+          quantity: qty,
+          size: size as CylinderSize,
+          depositAmount: (Number(tarif.depositAmount) || 0) * qty,
+        });
+      }
+
+      if (depositDikembalikan > 0) {
+        const sisaDeposit = Math.max(0, (member.totalDeposit || 0) - depositDikembalikan);
+        await supabase.from('members').update({ totalDeposit: sisaDeposit }).eq('id', memberId);
+        setMembers(prev => prev.map(m => (m.id === memberId ? { ...m, totalDeposit: sisaDeposit } : m)));
+      }
+    }
+
+    // Regulator sewaan yang ikut dikembalikan bersama tabung. Cuma dicatat
+    // sebagai baris RETURN -- regulatorUsedStock (kepemilikan) tidak disentuh,
+    // yang sedang beredar diturunkan dari transaksi ini.
+    if (returnRegulatorQty > 0) {
+      const tarifRegulator = tariffs.find(t => t.kind === 'REGULATOR' && t.isActive);
+      if (tarifRegulator) {
+        newTransactions.push({
+          id: `t-ret-reg-${Date.now()}`,
+          memberId,
+          type: 'RETURN',
+          date,
+          regulatorTariffId: tarifRegulator.id,
+          regulatorQty: returnRegulatorQty,
+        });
+      }
+    }
 
     // Update Debt
     if (isUnpaid && totalCost > 0) {
@@ -503,7 +723,7 @@ const App: React.FC = () => {
       <div className="h-screen w-full flex items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-gray-500 font-medium">Connecting to Database...</p>
+          <p className="text-gray-500 font-medium">Menghubungkan ke database...</p>
         </div>
       </div>
     );
@@ -527,13 +747,21 @@ const App: React.FC = () => {
             />
           } />
           <Route path="/inventory" element={
-            <CylinderList
+            <InventoryView
               cylinders={cylinders}
               transactions={transactions}
               onAdd={handleAddCylinder}
               onBulkAdd={handleBulkAddCylinder}
               onUpdate={handleUpdateCylinder}
               onDelete={handleDeleteCylinder}
+            />
+          } />
+          <Route path="/tukar-isi" element={
+            <GasExchangeView
+              tariffs={tariffs}
+              members={members}
+              transactions={transactions}
+              onSubmit={handleGasExchange}
             />
           } />
           <Route path="/rental" element={
@@ -543,7 +771,9 @@ const App: React.FC = () => {
               prices={memberPrices}
               gasPrices={gasPrices}
               transactions={transactions}
+              tariffs={tariffs}
               onCompleteRental={handleRental}
+              onNewRental={handleNewRental}
             />
           } />
           <Route path="/delivery" element={
@@ -608,6 +838,12 @@ const App: React.FC = () => {
                 onUpdateUser={handleUpdateUser}
                 onDeleteUser={handleDeleteUser}
               />
+            } />
+          )}
+
+          {currentUser.role === UserRole.Admin && (
+            <Route path="/master-data" element={
+              <MasterDataView tariffs={tariffs} transactions={transactions} onRefresh={fetchData} />
             } />
           )}
 
