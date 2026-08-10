@@ -46,6 +46,50 @@ export function hitungHoldingCurah(transactions: Transaction[], memberId: string
 }
 
 /**
+ * Baris transaksi SEWA regulator (bukan jual): punya tarif regulator dan
+ * jumlah. Baris jual (regulatorSalePrice) sengaja dikecualikan -- regulator
+ * yang terjual jadi milik pelanggan permanen, tidak pernah "beredar sewaan"
+ * dan tidak akan pernah dikembalikan.
+ */
+const barisRegulator = (t: Transaction) =>
+  Boolean(t.regulatorTariffId) && Number(t.regulatorQty) > 0 &&
+  (t.type === 'RETURN' || t.regulatorFee !== undefined);
+
+/**
+ * Berapa unit regulator bekas yang sedang dipegang seorang pelanggan, untuk
+ * satu tarif regulator tertentu. Sama prinsipnya dengan hitungHoldingCurah:
+ * disewa menambah, dikembalikan mengurangi, diturunkan dari transaksi supaya
+ * tidak melenceng dari sumbernya.
+ */
+export function hitungHoldingRegulator(transactions: Transaction[], memberId: string, regulatorTariffId: string): number {
+  if (!memberId || !regulatorTariffId) return 0;
+
+  let qty = 0;
+  for (const t of transactions) {
+    if (t.memberId !== memberId || t.regulatorTariffId !== regulatorTariffId || !barisRegulator(t)) continue;
+    if (t.type === 'RENTAL_OUT' || t.type === 'DELIVERY') qty += Number(t.regulatorQty) || 0;
+    else if (t.type === 'RETURN') qty -= Number(t.regulatorQty) || 0;
+  }
+  return Math.max(0, qty);
+}
+
+/**
+ * Berapa unit regulator bekas dari satu tarif yang sedang beredar (dipegang
+ * pelanggan mana pun). Dipakai Master Data untuk menghitung "Tersedia Sewa".
+ */
+export function totalRegulatorBeredar(transactions: Transaction[], regulatorTariffId: string): number {
+  if (!regulatorTariffId) return 0;
+
+  let qty = 0;
+  for (const t of transactions) {
+    if (t.regulatorTariffId !== regulatorTariffId || !barisRegulator(t)) continue;
+    if (t.type === 'RENTAL_OUT' || t.type === 'DELIVERY') qty += Number(t.regulatorQty) || 0;
+    else if (t.type === 'RETURN') qty -= Number(t.regulatorQty) || 0;
+  }
+  return Math.max(0, qty);
+}
+
+/**
  * Sebutan barang pada satu transaksi.
  *
  * Tabung berkode disebut lewat kode serinya. Baris curah tidak punya kode -- kalau

@@ -1,4 +1,4 @@
-import { CylinderStatus, MemberStatus, UserRole, RegulatorStatus } from './types';
+import { CylinderStatus, MemberStatus, UserRole } from './types';
 
 /**
  * Peta label bahasa Indonesia untuk nilai-nilai yang tersimpan di database.
@@ -25,13 +25,6 @@ export const STATUS_ANGGOTA: Record<MemberStatus, string> = {
   [MemberStatus.Active]: 'Aktif',
   [MemberStatus.Pending_Exit]: 'Menunggu Keluar',
   [MemberStatus.Non_Active]: 'Tidak Aktif',
-};
-
-export const STATUS_REGULATOR: Record<RegulatorStatus, string> = {
-  Available: 'Tersedia',
-  Rented: 'Disewa',
-  Sold: 'Terjual',
-  Damaged: 'Rusak',
 };
 
 export const JENIS_TRANSAKSI: Record<string, string> = {
@@ -78,9 +71,6 @@ export const labelStatusTabung = (v: string | null | undefined) =>
 
 export const labelStatusAnggota = (v: string | null | undefined) =>
   label(STATUS_ANGGOTA, v);
-
-export const labelStatusRegulator = (v: string | null | undefined) =>
-  label(STATUS_REGULATOR, v);
 
 export const labelJenisTransaksi = (v: string | null | undefined) =>
   label(JENIS_TRANSAKSI, v);

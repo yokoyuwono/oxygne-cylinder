@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Cylinder, CylinderStatus, Member, RentalTariff, Regulator } from '../types';
+import { Cylinder, CylinderStatus, Member, RentalTariff, Transaction } from '../types';
+import { totalRegulatorBeredar } from '../lib/bulkStock';
 
 export interface NewRentalItem {
   /** Kosong untuk baris curah -- botolnya tidak berkode, jadi tidak ada unit tertentu. */
@@ -13,9 +14,10 @@ export interface NewRentalItem {
   depositAmount: number;
   rentalFee: number;
   gasPrice: number;
-  regulatorRentId?: string;
+  regulatorTariffId?: string;
+  regulatorRented?: boolean;
   regulatorFee?: number;
-  regulatorSaleId?: string;
+  regulatorSold?: boolean;
   regulatorSalePrice?: number;
 }
 
@@ -32,14 +34,14 @@ interface NewRentalFormProps {
   cylinders: Cylinder[];
   members: Member[];
   tariffs: RentalTariff[];
-  regulators: Regulator[];
+  transactions: Transaction[];
   onSubmit: (payload: NewRentalPayload) => Promise<void>;
   onCancel: () => void;
 }
 
 const hariIni = () => new Date().toISOString().slice(0, 10);
 
-const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tariffs, regulators, onSubmit, onCancel }) => {
+const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tariffs, transactions, onSubmit, onCancel }) => {
   const [pelangganBaru, setPelangganBaru] = useState(true);
   const [nama, setNama] = useState('');
   const [alamat, setAlamat] = useState('');
@@ -97,12 +99,22 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
       .slice(0, 8);
   }, [cariMember, members]);
 
-  const regulatorTersedia = useMemo(() => {
-    const dipakai = new Set(
-      keranjang.flatMap(k => [k.regulatorRentId, k.regulatorSaleId].filter(Boolean) as string[])
-    );
-    return regulators.filter(r => r.status === 'Available' && !dipakai.has(r.id));
-  }, [regulators, keranjang]);
+  /**
+   * Stok regulator tersisa untuk SATU baris keranjang tertentu: kepemilikan
+   * dikurangi yang sudah beredar (transaksi lama) dan yang sudah dipilih di
+   * baris keranjang lain -- baris itu sendiri tidak ikut dikurangi, supaya
+   * centangnya tidak langsung terkunci begitu dipilih.
+   */
+  const sisaRegulator = (idxSaatIni: number) => {
+    if (!tarifRegulator) return { sisaSewa: 0, sisaJual: 0 };
+    const dipakaiSewa = keranjang.filter((k, i) => i !== idxSaatIni && k.regulatorRented).length;
+    const dipakaiJual = keranjang.filter((k, i) => i !== idxSaatIni && k.regulatorSold).length;
+    const beredar = totalRegulatorBeredar(transactions, tarifRegulator.id);
+    return {
+      sisaSewa: Math.max(0, (tarifRegulator.regulatorUsedStock || 0) - beredar - dipakaiSewa),
+      sisaJual: Math.max(0, (tarifRegulator.regulatorNewStock || 0) - dipakaiJual),
+    };
+  };
 
   const tambahTabung = (c: Cylinder) => {
     const tarif = cariTarif(c.gasType, c.size);
@@ -433,52 +445,51 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
                 </div>
 
                 {/* Regulator dipasangkan ke unit tertentu, jadi hanya untuk baris berkode. */}
-                {tarifRegulator && it.cylinderId && (
-                  <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">
+                {tarifRegulator && it.cylinderId && (() => {
+                  const { sisaSewa, sisaJual } = sisaRegulator(idx);
+                  return (
+                    <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <label className={`flex items-center gap-2 text-sm rounded-lg border px-3 py-2 ${sisaSewa > 0 || it.regulatorRented ? 'border-gray-200 cursor-pointer' : 'border-gray-100 text-gray-300 cursor-not-allowed'}`}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(it.regulatorRented)}
+                          disabled={!it.regulatorRented && sisaSewa <= 0}
+                          onChange={e => ubahItem(idx, {
+                            regulatorRented: e.target.checked,
+                            regulatorTariffId: (e.target.checked || it.regulatorSold) ? tarifRegulator.id : undefined,
+                            regulatorFee: e.target.checked ? Number(tarifRegulator.rentalFee) : undefined,
+                          })}
+                          className="rounded border-gray-300"
+                        />
                         Sewa Regulator ({formatIDR(tarifRegulator.rentalFee)})
+                        {sisaSewa <= 0 && !it.regulatorRented && <span className="text-[10px]">stok habis</span>}
                       </label>
-                      <select
-                        value={it.regulatorRentId || ''}
-                        onChange={e => ubahItem(idx, {
-                          regulatorRentId: e.target.value || undefined,
-                          regulatorFee: e.target.value ? Number(tarifRegulator.rentalFee) : undefined,
-                        })}
-                        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                      >
-                        <option value="">-- tidak sewa --</option>
-                        {it.regulatorRentId && <option value={it.regulatorRentId}>{regulators.find(r => r.id === it.regulatorRentId)?.code}</option>}
-                        {regulatorTersedia.map(r => <option key={r.id} value={r.id}>{r.code}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">
+                      <label className={`flex items-center gap-2 text-sm rounded-lg border px-3 py-2 ${sisaJual > 0 || it.regulatorSold ? 'border-gray-200 cursor-pointer' : 'border-gray-100 text-gray-300 cursor-not-allowed'}`}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(it.regulatorSold)}
+                          disabled={!it.regulatorSold && sisaJual <= 0}
+                          onChange={e => ubahItem(idx, {
+                            regulatorSold: e.target.checked,
+                            regulatorTariffId: (e.target.checked || it.regulatorRented) ? tarifRegulator.id : undefined,
+                            regulatorSalePrice: e.target.checked ? Number(tarifRegulator.salePrice) : undefined,
+                          })}
+                          className="rounded border-gray-300"
+                        />
                         Beli Regulator ({formatIDR(tarifRegulator.salePrice)})
+                        {sisaJual <= 0 && !it.regulatorSold && <span className="text-[10px]">stok habis</span>}
                       </label>
-                      <select
-                        value={it.regulatorSaleId || ''}
-                        onChange={e => ubahItem(idx, {
-                          regulatorSaleId: e.target.value || undefined,
-                          regulatorSalePrice: e.target.value ? Number(tarifRegulator.salePrice) : undefined,
-                        })}
-                        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                      >
-                        <option value="">-- tidak beli --</option>
-                        {it.regulatorSaleId && <option value={it.regulatorSaleId}>{regulators.find(r => r.id === it.regulatorSaleId)?.code}</option>}
-                        {regulatorTersedia.map(r => <option key={r.id} value={r.id}>{r.code}</option>)}
-                      </select>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             ))}
           </div>
         )}
 
-        {tarifRegulator && regulators.length === 0 && (
+        {tarifRegulator && (tarifRegulator.regulatorNewStock || 0) === 0 && (tarifRegulator.regulatorUsedStock || 0) === 0 && (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-3">
-            Stok regulator masih kosong, jadi pilihan sewa dan beli regulator belum bisa dipakai. Daftarkan unitnya di Stok Tabung &rarr; Regulator.
+            Stok regulator masih kosong, jadi pilihan sewa dan beli regulator belum bisa dipakai. Isi stoknya di Master Data &rarr; Tarif Regulator.
           </p>
         )}
       </div>

@@ -16,7 +16,7 @@ import HistoryView from './components/HistoryView';
 import MasterDataView from './components/MasterDataView';
 import GasExchangeView, { GasExchangePayload } from './components/GasExchangeView';
 import { NewRentalPayload } from './components/NewRentalForm';
-import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff, Regulator } from './types';
+import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff } from './types';
 import { supabase, isSupabaseConfigured, fetchAllRecords } from './lib/supabase';
 
 const App: React.FC = () => {
@@ -61,7 +61,6 @@ const App: React.FC = () => {
   const [refillPrices, setRefillPrices] = useState<RefillPrice[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]); // For Admin View
   const [tariffs, setTariffs] = useState<RentalTariff[]>([]);
-  const [regulators, setRegulators] = useState<Regulator[]>([]);
 
   // -- 1. FETCH INITIAL DATA --
   const fetchData = async () => {
@@ -76,8 +75,7 @@ const App: React.FC = () => {
         rsData,
         rpData,
         prData,
-        rtData,
-        rgData
+        rtData
       ] = await Promise.all([
         fetchAllRecords<Cylinder>('cylinders'),
         fetchAllRecords<Member>('members'),
@@ -87,8 +85,7 @@ const App: React.FC = () => {
         fetchAllRecords<RefillStation>('refill_stations'),
         fetchAllRecords<RefillPrice>('refill_prices'),
         fetchAllRecords<AppUser>('profiles'),
-        fetchAllRecords<RentalTariff>('rental_tariffs'),
-        fetchAllRecords<Regulator>('regulators')
+        fetchAllRecords<RentalTariff>('rental_tariffs')
       ]);
 
       if (cylData) setCylinders(cylData);
@@ -100,7 +97,6 @@ const App: React.FC = () => {
       if (rpData) setRefillPrices(rpData);
       if (prData) setUsers(prData);
       if (rtData) setTariffs(rtData);
-      if (rgData) setRegulators(rgData);
 
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -511,19 +507,16 @@ const App: React.FC = () => {
       if (error) throw new Error(`Gagal memperbarui stok ${item.gasType} ${item.size}: ${error.message}`);
     }
 
-    // -- 4. Regulator: yang disewa jadi Rented, yang dibeli jadi Sold --
-    const disewa = items.filter(i => i.regulatorRentId).map(i => i.regulatorRentId!);
-    const dijual = items.filter(i => i.regulatorSaleId).map(i => i.regulatorSaleId!);
-
-    if (disewa.length) {
-      await supabase.from('regulators')
-        .update({ status: 'Rented', currentHolder: member.name, memberId })
-        .in('id', disewa);
-    }
-    if (dijual.length) {
-      await supabase.from('regulators')
-        .update({ status: 'Sold', currentHolder: member.name, memberId })
-        .in('id', dijual);
+    // -- 4. Regulator terjual: kepemilikan stok baru berkurang permanen --
+    // Regulator sewaan TIDAK menyentuh regulatorUsedStock -- itu perputaran,
+    // bukan kepemilikan; yang sedang beredar diturunkan dari transaksi.
+    const regulatorTerjual = items.filter(i => i.regulatorSold && i.regulatorTariffId);
+    for (const item of regulatorTerjual) {
+      const tarif = tariffs.find(t => t.id === item.regulatorTariffId);
+      if (!tarif) continue;
+      const sisa = Math.max(0, (tarif.regulatorNewStock || 0) - 1);
+      const { error } = await supabase.from('rental_tariffs').update({ regulatorNewStock: sisa }).eq('id', tarif.id);
+      if (error) throw new Error(`Gagal memperbarui stok regulator baru: ${error.message}`);
     }
 
     // -- 5. Transaksi, satu per tabung, rincian dibekukan --
@@ -541,7 +534,8 @@ const App: React.FC = () => {
       gasPrice: i.gasPrice * i.quantity,
       regulatorFee: i.regulatorFee,
       regulatorSalePrice: i.regulatorSalePrice,
-      regulatorId: i.regulatorRentId || i.regulatorSaleId,
+      regulatorTariffId: i.regulatorTariffId,
+      regulatorQty: i.regulatorTariffId ? 1 : undefined,
       quantity: i.quantity,
       size: i.size as CylinderSize,
     }));
@@ -578,14 +572,6 @@ const App: React.FC = () => {
     setTransactions(prev => [...prev, tx]);
   };
 
-  /** Regulator sewaan yang dikembalikan: kembali ke stok, lepas dari pemegangnya. */
-  const bebaskanRegulator = async (regulatorIds: string[]) => {
-    if (!regulatorIds.length) return;
-    await supabase.from('regulators')
-      .update({ status: 'Available', currentHolder: null, memberId: null })
-      .in('id', regulatorIds);
-  };
-
   // Handler for rental transactions (Rentals AND Returns)
   const handleRental = async (
     memberId: string,
@@ -593,7 +579,7 @@ const App: React.FC = () => {
     returnCylinderIds: string[],
     totalCost: number,
     isUnpaid: boolean = false,
-    returnRegulatorIds: string[] = [],
+    returnRegulatorQty: number = 0,
     returnBulkQty: Record<string, number> = {}
   ) => {
     const member = members.find(m => m.id === memberId);
@@ -637,14 +623,21 @@ const App: React.FC = () => {
       }
     }
 
-    // Regulator sewaan yang ikut dikembalikan bersama tabung.
-    if (returnRegulatorIds.length) {
-      await bebaskanRegulator(returnRegulatorIds);
-      setRegulators(prev => prev.map(r =>
-        returnRegulatorIds.includes(r.id)
-          ? { ...r, status: 'Available' as const, currentHolder: undefined, memberId: undefined }
-          : r
-      ));
+    // Regulator sewaan yang ikut dikembalikan bersama tabung. Cuma dicatat
+    // sebagai baris RETURN -- regulatorUsedStock (kepemilikan) tidak disentuh,
+    // yang sedang beredar diturunkan dari transaksi ini.
+    if (returnRegulatorQty > 0) {
+      const tarifRegulator = tariffs.find(t => t.kind === 'REGULATOR' && t.isActive);
+      if (tarifRegulator) {
+        newTransactions.push({
+          id: `t-ret-reg-${Date.now()}`,
+          memberId,
+          type: 'RETURN',
+          date,
+          regulatorTariffId: tarifRegulator.id,
+          regulatorQty: returnRegulatorQty,
+        });
+      }
     }
 
     // Update Debt
@@ -757,12 +750,10 @@ const App: React.FC = () => {
             <InventoryView
               cylinders={cylinders}
               transactions={transactions}
-              regulators={regulators}
               onAdd={handleAddCylinder}
               onBulkAdd={handleBulkAddCylinder}
               onUpdate={handleUpdateCylinder}
               onDelete={handleDeleteCylinder}
-              onRefresh={fetchData}
             />
           } />
           <Route path="/tukar-isi" element={
@@ -781,7 +772,6 @@ const App: React.FC = () => {
               gasPrices={gasPrices}
               transactions={transactions}
               tariffs={tariffs}
-              regulators={regulators}
               onCompleteRental={handleRental}
               onNewRental={handleNewRental}
             />
@@ -853,7 +843,7 @@ const App: React.FC = () => {
 
           {currentUser.role === UserRole.Admin && (
             <Route path="/master-data" element={
-              <MasterDataView tariffs={tariffs} onRefresh={fetchData} />
+              <MasterDataView tariffs={tariffs} transactions={transactions} onRefresh={fetchData} />
             } />
           )}
 

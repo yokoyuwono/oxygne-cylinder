@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
-import { RentalTariff, GasType, CylinderSize } from '../types';
+import { RentalTariff, GasType, CylinderSize, Transaction } from '../types';
 import { supabase } from '../lib/supabase';
+import { totalRegulatorBeredar } from '../lib/bulkStock';
 
 interface MasterDataViewProps {
   tariffs: RentalTariff[];
+  transactions: Transaction[];
   onRefresh: () => Promise<void>;
 }
 
 type Draft = Partial<RentalTariff>;
 
-const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, onRefresh }) => {
+const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, transactions, onRefresh }) => {
   const [activeTab, setActiveTab] = useState<'cylinder' | 'regulator'>('cylinder');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>({});
@@ -39,7 +41,7 @@ const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, onRefresh }) =
     setDraft(
       activeTab === 'cylinder'
         ? { kind: 'CYLINDER', gasType: GasType.Oxygen, size: CylinderSize.Large, depositAmount: 0, rentalFee: 0, gasPrice: 0, salePrice: 0, isActive: true, isCoded: true, stockQty: 0 }
-        : { kind: 'REGULATOR', name: '', rentalFee: 0, salePrice: 0, depositAmount: 0, gasPrice: 0, isActive: true, isCoded: true, stockQty: 0 }
+        : { kind: 'REGULATOR', name: '', rentalFee: 0, salePrice: 0, depositAmount: 0, gasPrice: 0, isActive: true, isCoded: true, stockQty: 0, regulatorNewStock: 0, regulatorUsedStock: 0 }
     );
     setIsModalOpen(true);
   };
@@ -67,6 +69,8 @@ const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, onRefresh }) =
       salePrice: Number(draft.salePrice) || 0,
       isCoded: draft.kind === 'CYLINDER' ? (draft.isCoded ?? true) : true,
       stockQty: draft.kind === 'CYLINDER' && draft.isCoded === false ? (Number(draft.stockQty) || 0) : 0,
+      regulatorNewStock: draft.kind === 'REGULATOR' ? (Number(draft.regulatorNewStock) || 0) : 0,
+      regulatorUsedStock: draft.kind === 'REGULATOR' ? (Number(draft.regulatorUsedStock) || 0) : 0,
       isActive: draft.isActive ?? true,
     };
 
@@ -108,13 +112,13 @@ const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, onRefresh }) =
     showFeedback('Tarif dihapus.');
   };
 
-  const numberField = (label: string, key: keyof RentalTariff, hint?: string) => (
+  const numberField = (label: string, key: keyof RentalTariff, hint?: string, step = 1000) => (
     <div>
       <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5">{label}</label>
       <input
         type="number"
         min={0}
-        step={1000}
+        step={step}
         value={(draft[key] as number) ?? 0}
         onChange={e => setDraft({ ...draft, [key]: Number(e.target.value) })}
         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
@@ -238,18 +242,29 @@ const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, onRefresh }) =
                   <th className="px-6 py-3">Nama</th>
                   <th className="px-6 py-3 text-right">Biaya Sewa</th>
                   <th className="px-6 py-3 text-right">Harga Jual</th>
+                  <th className="px-6 py-3 text-right">Stok Bekas</th>
+                  <th className="px-6 py-3 text-right">Stok Baru</th>
+                  <th className="px-6 py-3 text-right">Sedang Disewa</th>
+                  <th className="px-6 py-3 text-right">Tersedia Sewa</th>
                   <th className="px-6 py-3 text-center">Aktif</th>
                   <th className="px-6 py-3 text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {regulatorTariffs.length === 0 ? (
-                  <tr><td colSpan={5} className="px-6 py-10 text-center text-gray-400">Belum ada tarif regulator.</td></tr>
-                ) : regulatorTariffs.map(t => (
+                  <tr><td colSpan={8} className="px-6 py-10 text-center text-gray-400">Belum ada tarif regulator.</td></tr>
+                ) : regulatorTariffs.map(t => {
+                  const sedangDisewa = totalRegulatorBeredar(transactions, t.id);
+                  const tersediaSewa = Math.max(0, (t.regulatorUsedStock || 0) - sedangDisewa);
+                  return (
                   <tr key={t.id} className={`hover:bg-gray-50 group ${!t.isActive ? 'opacity-50' : ''}`}>
                     <td className="px-6 py-4 font-bold text-gray-800">{t.name}</td>
                     <td className="px-6 py-4 text-right font-mono text-gray-700">{formatIDR(t.rentalFee)}</td>
                     <td className="px-6 py-4 text-right font-mono text-gray-700">{formatIDR(t.salePrice)}</td>
+                    <td className="px-6 py-4 text-right font-mono text-gray-700">{t.regulatorUsedStock || 0} unit</td>
+                    <td className="px-6 py-4 text-right font-mono text-gray-700">{t.regulatorNewStock || 0} unit</td>
+                    <td className="px-6 py-4 text-right font-mono text-gray-700">{sedangDisewa} unit</td>
+                    <td className="px-6 py-4 text-right font-mono text-gray-700">{tersediaSewa} unit</td>
                     <td className="px-6 py-4 text-center">
                       <button
                         onClick={() => toggleActive(t)}
@@ -270,7 +285,8 @@ const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, onRefresh }) =
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -362,6 +378,12 @@ const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, onRefresh }) =
                   <div className="grid grid-cols-2 gap-4">
                     {numberField('Biaya Sewa', 'rentalFee')}
                     {numberField('Harga Jual', 'salePrice')}
+                  </div>
+                  <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 grid grid-cols-2 gap-4">
+                    {numberField('Stok Bekas (sewa)', 'regulatorUsedStock',
+                      'Jumlah unit bekas dimiliki toko sebagai armada sewa. Tidak berubah saat disewa/dikembalikan.', 1)}
+                    {numberField('Stok Baru (jual)', 'regulatorNewStock',
+                      'Jumlah unit baru dimiliki toko, untuk dijual. Berkurang otomatis tiap terjual.', 1)}
                   </div>
                 </>
               )}

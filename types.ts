@@ -136,24 +136,13 @@ export interface Transaction {
   gasPrice?: number;           // Charge for the gas itself
   regulatorFee?: number;       // Regulator rental charge
   regulatorSalePrice?: number; // Regulator sale price
-  regulatorId?: string;        // Which regulator unit was rented or sold
+  regulatorTariffId?: string;  // Which regulator tariff this rental/sale/return refers to
+  regulatorQty?: number;       // How many regulator units in this line (rent, sale, or return)
 
   // Baris stok curah tidak punya cylinderId -- botolnya tidak berkode dan tidak
   // bisa dibedakan satu sama lain, jadi ukurannya disimpan langsung di sini.
   quantity?: number;
   size?: CylinderSize;
-}
-
-export type RegulatorStatus = 'Available' | 'Rented' | 'Sold' | 'Damaged';
-
-export interface Regulator {
-  id: string;
-  code: string;
-  status: RegulatorStatus;
-  currentHolder?: string;
-  memberId?: string;
-  notes?: string;
-  createdAt?: string;
 }
 
 /**
@@ -192,6 +181,18 @@ export interface RentalTariff {
    * yang pergi atau kembali permanen.
    */
   stockQty: number;
+
+  /**
+   * Stok regulator, hanya berlaku saat kind = 'REGULATOR'. Regulator tidak
+   * dilacak per unit -- hanya dua angka kepemilikan.
+   *
+   * regulatorNewStock berkurang saat terjual (state permanen). regulatorUsedStock
+   * TIDAK bergerak saat disewa/dikembalikan -- yang sedang beredar diturunkan dari
+   * riwayat transaksi (lihat hitungHoldingRegulator di lib/bulkStock.ts), bukan
+   * disimpan sebagai kolom yang diubah manual.
+   */
+  regulatorNewStock: number;
+  regulatorUsedStock: number;
 }
 
 // Chat types
