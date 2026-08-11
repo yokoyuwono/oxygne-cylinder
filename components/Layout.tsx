@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { AppUser, UserRole } from '../types';
+import { AppUser } from '../types';
+import { bolehKelolaPengguna } from '../lib/peran';
 import { labelPeran } from '../labels';
 
 interface LayoutProps {
@@ -90,11 +91,11 @@ const Layout: React.FC<LayoutProps> = ({ children, currentUser, onLogout }) => {
           </NavLink>
           <NavLink to="/rental" className={navLinkClass}>
             <span className="material-icons">shopping_cart_checkout</span>
-            Sewa Keluar
+            Tukar Besar &amp; Sewa
           </NavLink>
           <NavLink to="/tukar-isi" className={navLinkClass}>
             <span className="material-icons">swap_horiz</span>
-            Tukar Isi
+            Tukar kecil
           </NavLink>
           <NavLink to="/delivery" className={navLinkClass}>
             <span className="material-icons">local_shipping</span>
@@ -108,6 +109,10 @@ const Layout: React.FC<LayoutProps> = ({ children, currentUser, onLogout }) => {
             <span className="material-icons">inventory_2</span>
             Stok Tabung
           </NavLink>
+          <NavLink to="/pengeluaran" className={navLinkClass}>
+            <span className="material-icons">receipt_long</span>
+            Pengeluaran
+          </NavLink>
 
           <p className="px-4 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 mt-6">Administrasi</p>
           <NavLink to="/members" className={navLinkClass}>
@@ -119,14 +124,12 @@ const Layout: React.FC<LayoutProps> = ({ children, currentUser, onLogout }) => {
             Laporan &amp; Riwayat
           </NavLink>
 
-          {currentUser?.role === UserRole.Admin && (
-            <NavLink to="/master-data" className={navLinkClass}>
-              <span className="material-icons">tune</span>
-              Master Data
-            </NavLink>
-          )}
+          <NavLink to="/master-data" className={navLinkClass}>
+            <span className="material-icons">tune</span>
+            Master Data
+          </NavLink>
 
-          {currentUser?.role === UserRole.Admin && (
+          {bolehKelolaPengguna(currentUser?.role) && (
             <NavLink to="/admin" className={navLinkClass}>
               <span className="material-icons">admin_panel_settings</span>
               Pengguna

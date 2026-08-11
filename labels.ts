@@ -36,6 +36,9 @@ export const JENIS_TRANSAKSI: Record<string, string> = {
   DEBT_PAYMENT: 'Pembayaran Utang',
   DEPOSIT_REFUND: 'Pengembalian Deposit',
   GAS_EXCHANGE: 'Tukar Isi',
+  // Bukan sekadar 'Pengeluaran' -- biaya isi ulang ke vendor juga pengeluaran,
+  // dan keduanya berdampingan di daftar riwayat.
+  EXPENSE: 'Biaya Operasional',
 };
 
 export const STATUS_BAYAR: Record<string, string> = {
@@ -83,6 +86,17 @@ export const labelPeran = (v: string | null | undefined) =>
 
 /** Format tanggal seragam untuk seluruh app. */
 export const LOKAL = 'id-ID';
+
+/**
+ * Format rupiah seragam. Rumus yang sama sudah disalin di beberapa komponen sebagai
+ * formatIDR lokal; yang baru cukup memakai versi ini.
+ */
+export const formatIDR = (nilai: number) =>
+  new Intl.NumberFormat(LOKAL, {
+    style: 'currency',
+    currency: 'IDR',
+    minimumFractionDigits: 0,
+  }).format(nilai || 0);
 
 export const formatTanggal = (
   nilai: string | number | Date,

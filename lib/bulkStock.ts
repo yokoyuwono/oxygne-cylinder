@@ -94,10 +94,13 @@ export function totalRegulatorBeredar(transactions: Transaction[], regulatorTari
  *
  * Tabung berkode disebut lewat kode serinya. Baris curah tidak punya kode -- kalau
  * dipaksa memakai serialCode hasilnya "undefined", jadi disebut lewat jumlah dan
- * ukurannya.
+ * ukurannya. Pengeluaran operasional tidak menyangkut barang toko sama sekali, jadi
+ * yang dipakai keterangan yang diketik admin -- tanpa ini seluruh kolom "Detail
+ * Item" di semua laporan menulis "operasi batch" untuk baris pengeluaran.
  */
 export function sebutanBarang(t: Transaction, serialCode?: string): string {
   if (serialCode) return serialCode;
+  if (t.description) return t.description;
   if (t.quantity && t.size) return `${t.quantity} botol ${t.size}`;
   return 'operasi batch';
 }
