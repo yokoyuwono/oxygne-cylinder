@@ -17,6 +17,8 @@ import MasterDataView from './components/MasterDataView';
 import GasExchangeView, { GasExchangePayload } from './components/GasExchangeView';
 import { NewRentalPayload } from './components/NewRentalForm';
 import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff } from './types';
+import { bolehKelolaPengguna } from './lib/peran';
+import PengeluaranView, { PengeluaranPayload } from './components/PengeluaranView';
 import { supabase, isSupabaseConfigured, fetchAllRecords } from './lib/supabase';
 
 const App: React.FC = () => {
@@ -572,6 +574,33 @@ const App: React.FC = () => {
     setTransactions(prev => [...prev, tx]);
   };
 
+  /**
+   * Belanja operasional harian. Tidak menyentuh tabung, pelanggan, atau stok --
+   * hanya uang keluar dengan keterangan, jadi cukup satu baris transaksi.
+   */
+  const handleTambahPengeluaran = async (payload: PengeluaranPayload) => {
+    const tx: Transaction = {
+      id: `t-biaya-${Date.now()}`,
+      type: 'EXPENSE',
+      date: payload.date,
+      cost: payload.amount,
+      paymentStatus: 'PAID',
+      description: payload.description,
+    };
+
+    const { error } = await supabase.from('transactions').insert(tx);
+    if (error) throw new Error(`Gagal mencatat pengeluaran: ${error.message}`);
+
+    setTransactions(prev => [...prev, tx]);
+  };
+
+  const handleHapusPengeluaran = async (id: string) => {
+    const { error } = await supabase.from('transactions').delete().eq('id', id);
+    if (error) throw new Error(`Gagal menghapus pengeluaran: ${error.message}`);
+
+    setTransactions(prev => prev.filter(t => t.id !== id));
+  };
+
   // Handler for rental transactions (Rentals AND Returns)
   const handleRental = async (
     memberId: string,
@@ -744,6 +773,7 @@ const App: React.FC = () => {
               transactions={transactions}
               members={members}
               stations={refillStations}
+              tariffs={tariffs}
             />
           } />
           <Route path="/inventory" element={
@@ -762,6 +792,14 @@ const App: React.FC = () => {
               members={members}
               transactions={transactions}
               onSubmit={handleGasExchange}
+            />
+          } />
+          <Route path="/pengeluaran" element={
+            <PengeluaranView
+              transactions={transactions}
+              role={currentUser.role}
+              onSubmit={handleTambahPengeluaran}
+              onDelete={handleHapusPengeluaran}
             />
           } />
           <Route path="/rental" element={
@@ -810,6 +848,7 @@ const App: React.FC = () => {
                 }}
                 transactions={transactions}
                 cylinders={cylinders}
+                tariffs={tariffs}
                 onAddMember={handleAddMember}
                 onUpdateMember={handleUpdateMember}
                 onDeleteMember={handleDeleteMember}
@@ -825,11 +864,12 @@ const App: React.FC = () => {
               transactions={transactions}
               members={members}
               stations={refillStations}
+              role={currentUser.role}
             />
           } />
 
           {/* Admin Only Route */}
-          {currentUser.role === UserRole.Admin && (
+          {bolehKelolaPengguna(currentUser.role) && (
             <Route path="/admin" element={
               <AdminView
                 users={users}
@@ -841,11 +881,11 @@ const App: React.FC = () => {
             } />
           )}
 
-          {currentUser.role === UserRole.Admin && (
-            <Route path="/master-data" element={
-              <MasterDataView tariffs={tariffs} transactions={transactions} onRefresh={fetchData} />
-            } />
-          )}
+          {/* Master Data terbuka untuk semua peran -- tarif dan stok bagian dari
+              pekerjaan harian Operator, bukan urusan keuangan. */}
+          <Route path="/master-data" element={
+            <MasterDataView tariffs={tariffs} transactions={transactions} onRefresh={fetchData} />
+          } />
 
           <Route path="/history" element={
             <HistoryView

@@ -1,7 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Cylinder, Transaction, Member, RefillStation, GasType, CylinderStatus } from '../types';
+import { Cylinder, Transaction, Member, RefillStation, GasType, CylinderStatus, UserRole } from '../types';
 import { labelJenisTransaksi, labelStatusBayar } from '../labels';
 import { sebutanBarang } from '../lib/bulkStock';
+import { bolehLihatKeuanganPenuh } from '../lib/peran';
+import { hariIni, hitungLaporanHarian } from '../lib/laporanHarian';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { supabase } from '../lib/supabase';
 
@@ -10,6 +12,7 @@ interface ReportsViewProps {
   transactions: Transaction[];
   members: Member[];
   stations: RefillStation[];
+  role?: UserRole;
 }
 
 const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
@@ -78,8 +81,14 @@ const DeliveryManifestCard: React.FC<{ date: string, txs: Transaction[], cylinde
   );
 };
 
-const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, members, stations }) => {
-  const [activeTab, setActiveTab] = useState<'inventory' | 'financials' | 'logs' | 'delivery'>('financials');
+const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, members, stations, role }) => {
+  // Rekap menyeluruh -- total, tren bulanan, laba, peringkat pelanggan -- hanya untuk
+  // Administrator. Peran lain melihat keuangan sehari demi sehari lewat tab Harian.
+  const bolehRekapPenuh = bolehLihatKeuanganPenuh(role);
+
+  const [activeTab, setActiveTab] = useState<'inventory' | 'financials' | 'logs' | 'delivery' | 'harian'>(
+    bolehRekapPenuh ? 'financials' : 'harian');
+  const [tanggalHarian, setTanggalHarian] = useState(hariIni);
   const [logFilter, setLogFilter] = useState('');
   
   // -- New State for Logs --
@@ -123,7 +132,10 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
   const incomeTransactions = transactions.filter(
     t => (t.type === 'RENTAL_OUT' || t.type === 'GAS_EXCHANGE') && (t.cost || 0) > 0
   );
-  const expenseTransactions = transactions.filter(t => t.type === 'REFILL_IN' && (t.cost || 0) > 0);
+  // Biaya isi ulang ke vendor dan belanja operasional harian sama-sama uang keluar.
+  const expenseTransactions = transactions.filter(
+    t => (t.type === 'REFILL_IN' || t.type === 'EXPENSE') && (t.cost || 0) > 0
+  );
 
   const totalIncome = incomeTransactions.reduce((sum, t) => sum + (t.cost || 0), 0);
   const totalExpenses = expenseTransactions.reduce((sum, t) => sum + (t.cost || 0), 0);
@@ -142,9 +154,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
             monthlyData[key] = { name, Income: 0, Expense: 0, timestamp: date.getTime() };
         }
         
-        if (t.type === 'RENTAL_OUT') {
+        // Tukar isi ikut pendapatan, sama seperti saringan di atas -- kalau hanya
+        // RENTAL_OUT yang dijumlah, grafik ini lebih kecil dari KPI Total Pemasukan.
+        if (t.type === 'RENTAL_OUT' || t.type === 'GAS_EXCHANGE') {
             monthlyData[key].Income += (t.cost || 0);
-        } else if (t.type === 'REFILL_IN') {
+        } else if (t.type === 'REFILL_IN' || t.type === 'EXPENSE') {
             monthlyData[key].Expense += (t.cost || 0);
         }
     });
@@ -174,6 +188,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
   const recentFinancialActivity = [...incomeTransactions, ...expenseTransactions]
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, 10);
+
+  // -- Data Processing: Laporan Harian --
+  const laporanHarian = useMemo(
+      () => hitungLaporanHarian(transactions, tanggalHarian),
+      [transactions, tanggalHarian]);
 
   // -- Data Processing: Logs --
   const filteredLogs = useMemo(() => {
@@ -235,7 +254,9 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
         .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime()); 
   }, [deliveryTransactions, activeTab]);
 
-  const getTxDescription = (t: Transaction) => {
+  // tampilkanNominal dilewatkan dari pemanggil: baris REFILL_IN menempelkan biaya ke
+  // subtitle, jadi menyembunyikan kolom Jumlah saja tidak cukup menutup nominalnya.
+  const getTxDescription = (t: Transaction, tampilkanNominal = true) => {
       const cyl = cylinders.find(c => c.id === t.cylinderId);
       const member = members.find(m => m.id === t.memberId);
       const station = stations.find(s => s.id === t.refillStationId);
@@ -245,10 +266,12 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           case 'RENTAL_OUT': return { title: `Menyewakan ${code}`, subtitle: `Ke ${member?.companyName}`, icon: 'shopping_cart', color: 'bg-blue-100 text-blue-600', badge: 'SEWA' };
           case 'RETURN': return { title: `Dikembalikan ${code}`, subtitle: `Dari ${member?.companyName}`, icon: 'assignment_return', color: 'bg-green-100 text-green-600', badge: 'KEMBALI' };
           case 'REFILL_OUT': return { title: `Kirim Isi Ulang ${code}`, subtitle: `Ke ${station?.name}`, icon: 'local_shipping', color: 'bg-orange-100 text-orange-600', badge: 'KIRIM' };
-          case 'REFILL_IN': return { title: `Diterima Kembali ${code}`, subtitle: `Biaya: ${t.cost ? formatIDR(t.cost) : '-'}`, icon: 'inventory_2', color: 'bg-indigo-100 text-indigo-600', badge: 'TERIMA' };
+          case 'REFILL_IN': return { title: `Diterima Kembali ${code}`, subtitle: tampilkanNominal ? `Biaya: ${t.cost ? formatIDR(t.cost) : '-'}` : `Dari ${station?.name || 'isi ulang'}`, icon: 'inventory_2', color: 'bg-indigo-100 text-indigo-600', badge: 'TERIMA' };
           case 'DEBT_PAYMENT': return { title: 'Pembayaran Utang', subtitle: `Dari ${member?.companyName}`, icon: 'payments', color: 'bg-teal-100 text-teal-600', badge: 'BAYAR' };
           case 'DEPOSIT_REFUND': return { title: 'Pengembalian Deposit', subtitle: `Ke ${member?.companyName}`, icon: 'savings', color: 'bg-purple-100 text-purple-600', badge: 'REFUND' };
           case 'DELIVERY': return { title: `Pengiriman ${code}`, subtitle: 'Dalam Perjalanan', icon: 'local_shipping', color: 'bg-cyan-100 text-cyan-600', badge: 'ANTAR' };
+          case 'GAS_EXCHANGE': return { title: `Tukar Isi ${sebutanBarang(t)}`, subtitle: member ? `Untuk ${member.companyName}` : 'Pembeli lepas', icon: 'swap_horiz', color: 'bg-teal-100 text-teal-600', badge: 'TUKAR' };
+          case 'EXPENSE': return { title: t.description || 'Biaya Operasional', subtitle: 'Belanja operasional', icon: 'receipt_long', color: 'bg-rose-100 text-rose-600', badge: 'BIAYA' };
           default: return { title: 'Tidak diketahui', subtitle: '', icon: 'help', color: 'bg-gray-100', badge: 'LAIN' };
       }
   };
@@ -262,6 +285,8 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           case 'DEBT_PAYMENT': return 'bg-teal-100 text-teal-800';
           case 'DEPOSIT_REFUND': return 'bg-purple-100 text-purple-800';
           case 'DELIVERY': return 'bg-cyan-100 text-cyan-800';
+          case 'GAS_EXCHANGE': return 'bg-teal-100 text-teal-800';
+          case 'EXPENSE': return 'bg-rose-100 text-rose-800';
           default: return 'bg-gray-100 text-gray-800';
       }
   };
@@ -304,7 +329,10 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
             {[
                 { id: 'inventory', label: 'Stok & Pemakaian', icon: 'pie_chart' },
                 { id: 'delivery', label: 'Laporan Pengiriman', icon: 'local_shipping' },
-                { id: 'financials', label: 'Keuangan', icon: 'paid' },
+                { id: 'harian', label: 'Laporan Harian', icon: 'today' },
+                // Tabnya disaring di sini, bukan cuma blok rendernya -- kalau hanya
+                // bloknya, tombolnya tetap bisa diklik dan halamannya jadi kosong.
+                ...(bolehRekapPenuh ? [{ id: 'financials', label: 'Keuangan', icon: 'paid' }] : []),
                 { id: 'logs', label: 'Riwayat Aktivitas', icon: 'receipt_long' }
             ].map(tab => (
                 <button
@@ -422,8 +450,96 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
         </div>
       )}
 
+      {/* TAB: LAPORAN HARIAN */}
+      {activeTab === 'harian' && (
+          <div className="space-y-6 animate-fade-in">
+              <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col sm:flex-row sm:items-center gap-3">
+                  <label htmlFor="tanggal-harian" className="text-sm font-medium text-gray-700 shrink-0">
+                      Tanggal laporan
+                  </label>
+                  <input
+                      id="tanggal-harian"
+                      type="date"
+                      value={tanggalHarian}
+                      max={hariIni()}
+                      onChange={e => setTanggalHarian(e.target.value)}
+                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                  <span className="text-sm text-gray-500 sm:ml-auto">
+                      {tanggalHarian
+                          ? new Date(`${tanggalHarian}T00:00:00`).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+                          : 'Pilih tanggal'}
+                  </span>
+              </div>
+
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                      <p className="text-xs text-gray-500 uppercase font-bold">Pemasukan</p>
+                      <p className="text-2xl font-bold text-green-600">{formatIDR(laporanHarian.pemasukan)}</p>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                      <p className="text-xs text-gray-500 uppercase font-bold">Pengeluaran</p>
+                      <p className="text-2xl font-bold text-red-600">{formatIDR(laporanHarian.pengeluaran)}</p>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm col-span-2 lg:col-span-1">
+                      <p className="text-xs text-gray-500 uppercase font-bold">Jumlah Transaksi</p>
+                      <p className="text-2xl font-bold text-gray-800">{laporanHarian.jumlahTransaksi}</p>
+                  </div>
+              </div>
+
+              {laporanHarian.transaksi.length > 0 ? (
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                      <div className="overflow-x-auto">
+                          <table className="w-full text-left text-sm">
+                              <thead className="bg-gray-50 border-b border-gray-200">
+                                  <tr>
+                                      <th className="px-6 py-3 font-semibold text-gray-700 w-24">Jam</th>
+                                      <th className="px-6 py-3 font-semibold text-gray-700 w-32">Jenis</th>
+                                      <th className="px-6 py-3 font-semibold text-gray-700">Detail Item</th>
+                                      <th className="px-6 py-3 font-semibold text-gray-700">Pihak Terkait</th>
+                                      <th className="px-6 py-3 font-semibold text-gray-700 text-right">Jumlah</th>
+                                  </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100">
+                                  {laporanHarian.transaksi.map(t => {
+                                      const cyl = cylinders.find(c => c.id === t.cylinderId);
+                                      const member = members.find(m => m.id === t.memberId);
+                                      const station = stations.find(s => s.id === t.refillStationId);
+                                      return (
+                                          <tr key={t.id} className="hover:bg-gray-50">
+                                              <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
+                                                  {new Date(t.date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                                              </td>
+                                              <td className="px-6 py-4">
+                                                  <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${getTypeBadgeClass(t.type)}`}>
+                                                      {labelJenisTransaksi(t.type)}
+                                                  </span>
+                                              </td>
+                                              <td className="px-6 py-4 text-gray-700">{sebutanBarang(t, cyl?.serialCode)}</td>
+                                              <td className="px-6 py-4 text-gray-700">
+                                                  {member ? member.companyName : (station ? station.name : '-')}
+                                              </td>
+                                              <td className="px-6 py-4 text-right font-medium">
+                                                  {t.cost ? formatIDR(t.cost) : '-'}
+                                              </td>
+                                          </tr>
+                                      );
+                                  })}
+                              </tbody>
+                          </table>
+                      </div>
+                  </div>
+              ) : (
+                  <div className="p-12 text-center text-gray-400 bg-white rounded-xl border border-gray-200 border-dashed">
+                      <span className="material-icons text-3xl mb-2">event_busy</span>
+                      <p>Tidak ada transaksi pada tanggal ini.</p>
+                  </div>
+              )}
+          </div>
+      )}
+
       {/* TAB: FINANCIALS */}
-      {activeTab === 'financials' && (
+      {activeTab === 'financials' && bolehRekapPenuh && (
           <div className="space-y-6 animate-fade-in">
               {/* Summary Cards */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -528,9 +644,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                               <p className="text-sm font-bold text-gray-800">
                                                   {t.type === 'GAS_EXCHANGE'
                                                       ? `Tukar Isi - ${member?.companyName || 'pembeli lepas'}`
-                                                      : isIncome
-                                                          ? `Pendapatan Sewa - ${member?.companyName || 'Tidak diketahui'}`
-                                                          : `Biaya Isi Ulang - ${cyl?.gasType}`}
+                                                      : t.type === 'EXPENSE'
+                                                          ? `Biaya Operasional - ${t.description || 'tanpa keterangan'}`
+                                                          : isIncome
+                                                              ? `Pendapatan Sewa - ${member?.companyName || 'Tidak diketahui'}`
+                                                              : `Biaya Isi Ulang - ${cyl?.gasType}`}
                                               </p>
                                               <p className="text-xs text-gray-500">
                                                   {new Date(t.date).toLocaleDateString('id-ID')} • {sebutanBarang(t, cyl?.serialCode)}
@@ -579,6 +697,8 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                       <option value="DEBT_PAYMENT">Pembayaran Utang</option>
                       <option value="DEPOSIT_REFUND">Pengembalian Deposit</option>
                       <option value="DELIVERY">Pengiriman</option>
+                      <option value="GAS_EXCHANGE">Tukar Isi</option>
+                      <option value="EXPENSE">Biaya Operasional</option>
                   </select>
 
                   <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
@@ -611,7 +731,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                             <th className="px-6 py-3 font-semibold text-gray-700 w-32">Jenis</th>
                                             <th className="px-6 py-3 font-semibold text-gray-700">Detail Item</th>
                                             <th className="px-6 py-3 font-semibold text-gray-700">Pihak Terkait</th>
-                                            <th className="px-6 py-3 font-semibold text-gray-700 text-right">Jumlah</th>
+                                            {bolehRekapPenuh && <th className="px-6 py-3 font-semibold text-gray-700 text-right">Jumlah</th>}
                                             <th className="px-6 py-3 font-semibold text-gray-700 text-right">Status</th>
                                         </tr>
                                     </thead>
@@ -637,6 +757,10 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                                                 <div className="font-mono font-medium text-gray-800">{cyl.serialCode}</div>
                                                                 <div className="text-xs text-gray-500">{cyl.gasType} • {cyl.size}</div>
                                                             </div>
+                                                        ) : t.description ? (
+                                                            // Baris pengeluaran tidak menyangkut tabung -- keterangannya yang
+                                                            // menjelaskan barisnya, tanpa ini kolomnya cuma "N/A".
+                                                            <span className="text-gray-700">{t.description}</span>
                                                         ) : (
                                                             <span className="text-gray-400 italic">N/A</span>
                                                         )}
@@ -644,9 +768,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                                     <td className="px-6 py-4 text-gray-700">
                                                         {member ? member.companyName : (station ? station.name : '-')}
                                                     </td>
-                                                    <td className="px-6 py-4 text-right font-medium">
-                                                        {t.cost ? formatIDR(t.cost) : '-'}
-                                                    </td>
+                                                    {bolehRekapPenuh && (
+                                                        <td className="px-6 py-4 text-right font-medium">
+                                                            {t.cost ? formatIDR(t.cost) : '-'}
+                                                        </td>
+                                                    )}
                                                     <td className="px-6 py-4 text-right">
                                                         {t.paymentStatus ? (
                                                             <span className={`text-xs px-2 py-0.5 rounded font-bold uppercase ${t.paymentStatus === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
@@ -669,7 +795,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                           </div>
                       ) : (
                         filteredLogs.map(t => {
-                          const info = getTxDescription(t);
+                          const info = getTxDescription(t, bolehRekapPenuh);
                           return (
                             <div key={t.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex gap-4 items-start">
                                 {/* Timeline Line (Visual Only) */}
@@ -700,7 +826,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                         )}
                                     </div>
                                 </div>
-                                {t.cost && (
+                                {bolehRekapPenuh && t.cost && (
                                     <div className="text-right">
                                         <span className="block font-bold text-gray-700 text-sm">{formatIDR(t.cost)}</span>
                                     </div>

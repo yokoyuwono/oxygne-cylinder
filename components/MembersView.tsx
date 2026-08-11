@@ -1,13 +1,15 @@
 ﻿import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Member, MemberPrice, Transaction, Cylinder, MemberStatus } from '../types';
-import { labelStatusAnggota, labelStatusTabung, labelJenisTransaksi } from '../labels';
+import { Member, MemberPrice, Transaction, Cylinder, MemberStatus, RentalTariff } from '../types';
+import { labelStatusAnggota, labelStatusTabung, labelJenisTransaksi, formatTanggal } from '../labels';
 import { supabase } from '../lib/supabase';
+import { HARI_MASA_TUNGGU, RingkasanHolding, hitungSemuaHolding, hitungStatusMasaTunggu } from '../lib/memberExit';
 
 interface MembersViewProps {
     members: Member[];
     prices: MemberPrice[];
     transactions: Transaction[];
     cylinders: Cylinder[];
+    tariffs: RentalTariff[];
     onAddMember: (member: Member) => void;
     onUpdateMember: (member: Member) => void;
     onDeleteMember: (id: string) => void;
@@ -22,6 +24,7 @@ const MembersView: React.FC<MembersViewProps> = ({
     prices,
     transactions,
     cylinders,
+    tariffs,
     onAddMember,
     onUpdateMember,
     onDeleteMember,
@@ -51,6 +54,14 @@ const MembersView: React.FC<MembersViewProps> = ({
     const [paymentAmount, setPaymentAmount] = useState<string>('');
 
     const [memberToDelete, setMemberToDelete] = useState<Member | null>(null);
+
+    // Alur keluar pelanggan: keduanya memakai centang pernyataan, bukan blokir keras
+    // -- aplikasi tidak pernah tahu barang sudah kembali secara fisik atau belum,
+    // yang tahu adalah admin di depan gudang.
+    const [isExitModalOpen, setIsExitModalOpen] = useState(false);
+    const [exitAcknowledged, setExitAcknowledged] = useState(false);
+    const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
+    const [refundAcknowledged, setRefundAcknowledged] = useState(false);
 
     // History Server Side State
     const [historyTransactions, setHistoryTransactions] = useState<Transaction[]>([]);
@@ -117,9 +128,15 @@ const MembersView: React.FC<MembersViewProps> = ({
         return pagedMembers.find(m => m.id === selectedMemberId) || initialMembers.find(m => m.id === selectedMemberId);
     }, [pagedMembers, initialMembers, selectedMemberId]);
 
-    const memberHoldings = useMemo(() =>
-        selectedMemberId ? cylinders.filter(c => c.currentHolder === selectedMemberId) : [],
-        [cylinders, selectedMemberId]);
+    const ringkasanHolding = useMemo(
+        () => hitungSemuaHolding(cylinders, transactions, tariffs, selectedMemberId),
+        [cylinders, transactions, tariffs, selectedMemberId]);
+
+    const memberHoldings = ringkasanHolding.tabungBerkode;
+
+    const statusMasaTunggu = useMemo(
+        () => selectedMember?.exitRequestDate ? hitungStatusMasaTunggu(selectedMember.exitRequestDate) : null,
+        [selectedMember?.exitRequestDate]);
 
     // Fetch History Effect
     useEffect(() => {
@@ -217,21 +234,35 @@ const MembersView: React.FC<MembersViewProps> = ({
         setIsDebtModalOpen(false);
     };
 
-    const handleExitRequest = () => {
-        if (selectedMember && confirm('Yakin ingin menandai pelanggan ini untuk keluar?')) {
-            onRequestExit(selectedMember.id);
-            setTimeout(fetchMembers, 500);
-        }
+    const openExitModal = () => {
+        setExitAcknowledged(false);
+        setIsExitModalOpen(true);
     };
 
-    const handleRefund = () => {
-        if (selectedMember && selectedMember.totalDeposit > 0) {
-            if (confirm(`Kembalikan deposit sebesar ${formatIDR(selectedMember.totalDeposit)}?`)) {
-                onProcessRefund(selectedMember.id, selectedMember.totalDeposit);
-                setTimeout(fetchMembers, 500);
-            }
-        }
+    const confirmExitRequest = () => {
+        if (!selectedMember) return;
+        onRequestExit(selectedMember.id);
+        setTimeout(fetchMembers, 500);
+        setIsExitModalOpen(false);
     };
+
+    const openRefundModal = () => {
+        setRefundAcknowledged(false);
+        setIsRefundModalOpen(true);
+    };
+
+    const confirmRefund = () => {
+        if (!selectedMember || selectedMember.totalDeposit <= 0) return;
+        onProcessRefund(selectedMember.id, selectedMember.totalDeposit);
+        setTimeout(fetchMembers, 500);
+        setIsRefundModalOpen(false);
+    };
+
+    // Pencairan deposit hanya lolos tanpa pernyataan kalau masa tunggu sudah lewat
+    // DAN tidak ada barang tersisa. Tanggal pengajuan yang tidak tercatat dihitung
+    // sebagai belum lewat -- tidak ada bukti, tidak ada kelonggaran.
+    const exitPerluPernyataan = ringkasanHolding.totalBarang > 0;
+    const refundPerluPernyataan = ringkasanHolding.totalBarang > 0 || !statusMasaTunggu?.sudahLewat;
 
     // -- Member Price Handlers --
     const handleOpenAddPrice = () => {
@@ -463,12 +494,12 @@ const MembersView: React.FC<MembersViewProps> = ({
 
                                 {/* Refund Action */}
                                 {(selectedMember.status === MemberStatus.Pending_Exit || selectedMember.status === MemberStatus.Non_Active) && selectedMember.totalDeposit > 0 && (
-                                    <button onClick={handleRefund} className="mt-2 text-xs bg-green-600 text-white px-2 py-1 rounded shadow-sm hover:bg-green-700">
+                                    <button onClick={openRefundModal} className="mt-2 text-xs bg-green-600 text-white px-2 py-1 rounded shadow-sm hover:bg-green-700">
                                         Proses Pengembalian
                                     </button>
                                 )}
                                 {selectedMember.status === MemberStatus.Active && (
-                                    <button onClick={handleExitRequest} className="mt-2 text-[10px] text-red-500 hover:underline">
+                                    <button onClick={openExitModal} className="mt-2 text-[10px] text-red-500 hover:underline">
                                         Ajukan Keluar
                                     </button>
                                 )}
@@ -825,8 +856,207 @@ const MembersView: React.FC<MembersViewProps> = ({
                     </div>
                 </div>
             )}
+
+            {/* Ajukan Keluar */}
+            {isExitModalOpen && selectedMember && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden animate-fade-in-up">
+                        <div className="bg-amber-600 px-6 py-4 flex justify-between items-center text-white">
+                            <h3 className="font-bold flex items-center gap-2"><span className="material-icons">logout</span> Ajukan Keluar Pelanggan</h3>
+                            <button onClick={() => setIsExitModalOpen(false)} className="text-amber-200 hover:text-white"><span className="material-icons">close</span></button>
+                        </div>
+                        <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
+                            <p className="text-sm text-gray-700">
+                                <strong>{selectedMember.companyName}</strong> akan ditandai <strong>Menunggu Keluar</strong>.
+                                Deposit {formatIDR(selectedMember.totalDeposit || 0)} baru boleh dicairkan setelah masa tunggu {HARI_MASA_TUNGGU} hari sejak hari ini.
+                            </p>
+
+                            <RingkasanBarangDipegang ringkasan={ringkasanHolding} />
+
+                            {(selectedMember.totalDebt || 0) > 0 && (
+                                <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                                    Catatan: pelanggan ini masih punya utang {formatIDR(selectedMember.totalDebt)}. Utang tidak menghalangi pengajuan keluar, tapi sebaiknya diselesaikan sebelum deposit dicairkan.
+                                </p>
+                            )}
+
+                            {exitPerluPernyataan && (
+                                <PernyataanVerifikasi
+                                    checked={exitAcknowledged}
+                                    onChange={setExitAcknowledged}
+                                    label="Saya sudah memverifikasi secara fisik bahwa seluruh barang di atas sudah dikembalikan ke toko."
+                                />
+                            )}
+                        </div>
+                        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+                            <button onClick={() => setIsExitModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Batal</button>
+                            <button
+                                onClick={confirmExitRequest}
+                                disabled={exitPerluPernyataan && !exitAcknowledged}
+                                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium"
+                            >
+                                Ajukan Keluar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Proses Pengembalian Deposit */}
+            {isRefundModalOpen && selectedMember && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden animate-fade-in-up">
+                        <div className="bg-green-600 px-6 py-4 flex justify-between items-center text-white">
+                            <h3 className="font-bold flex items-center gap-2"><span className="material-icons">savings</span> Proses Pengembalian Deposit</h3>
+                            <button onClick={() => setIsRefundModalOpen(false)} className="text-green-200 hover:text-white"><span className="material-icons">close</span></button>
+                        </div>
+                        <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
+                            <div>
+                                <p className="text-sm text-gray-600 mb-1">Deposit yang akan dikembalikan ke <strong>{selectedMember.companyName}</strong></p>
+                                <p className="text-2xl font-bold text-green-600">{formatIDR(selectedMember.totalDeposit || 0)}</p>
+                            </div>
+
+                            {/* Masa tunggu */}
+                            {!statusMasaTunggu ? (
+                                <div className="flex items-start gap-2 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                                    <span className="material-icons text-gray-500 text-lg">help_outline</span>
+                                    <div>
+                                        <p className="text-sm font-semibold text-gray-800">Tanggal pengajuan keluar tidak tercatat</p>
+                                        <p className="text-xs text-gray-600">Masa tunggu {HARI_MASA_TUNGGU} hari tidak bisa diperiksa untuk pelanggan ini.</p>
+                                    </div>
+                                </div>
+                            ) : statusMasaTunggu.sudahLewat ? (
+                                <div className="flex items-start gap-2 bg-green-50 border border-green-200 rounded-lg p-3">
+                                    <span className="material-icons text-green-600 text-lg">event_available</span>
+                                    <div>
+                                        <p className="text-sm font-semibold text-green-800">Masa tunggu {HARI_MASA_TUNGGU} hari sudah terlewati</p>
+                                        <p className="text-xs text-green-700">Deposit boleh dicairkan sejak {formatTanggal(statusMasaTunggu.tanggalTarget, { day: 'numeric', month: 'long', year: 'numeric' })}.</p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                    <span className="material-icons text-amber-600 text-lg">hourglass_top</span>
+                                    <div>
+                                        <p className="text-sm font-semibold text-amber-800">Masa tunggu belum selesai — sisa {statusMasaTunggu.sisaHari} hari</p>
+                                        <p className="text-xs text-amber-700">Deposit baru boleh dicairkan mulai {formatTanggal(statusMasaTunggu.tanggalTarget, { day: 'numeric', month: 'long', year: 'numeric' })}.</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            <RingkasanBarangDipegang ringkasan={ringkasanHolding} />
+
+                            {(selectedMember.totalDebt || 0) > 0 && (
+                                <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                                    Catatan: pelanggan ini masih punya utang {formatIDR(selectedMember.totalDebt)}. Pencairan deposit di sini tidak memotong utang tersebut.
+                                </p>
+                            )}
+
+                            {refundPerluPernyataan && (
+                                <PernyataanVerifikasi
+                                    checked={refundAcknowledged}
+                                    onChange={setRefundAcknowledged}
+                                    label="Saya tetap mencairkan deposit ini dengan sadar atas peringatan di atas."
+                                />
+                            )}
+                        </div>
+                        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+                            <button onClick={() => setIsRefundModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">Batal</button>
+                            <button
+                                onClick={confirmRefund}
+                                disabled={refundPerluPernyataan && !refundAcknowledged}
+                                className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium"
+                            >
+                                Cairkan Deposit
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
+
+/**
+ * Daftar barang toko yang masih tercatat di tangan pelanggan, dipakai modal
+ * pengajuan keluar dan modal pencairan deposit. Rinci per barang supaya admin
+ * bisa mencocokkannya satu per satu dengan yang benar-benar ada di gudang.
+ */
+const RingkasanBarangDipegang: React.FC<{ ringkasan: RingkasanHolding }> = ({ ringkasan }) => {
+    if (ringkasan.totalBarang === 0) {
+        return (
+            <div className="flex items-start gap-2 bg-green-50 border border-green-200 rounded-lg p-3">
+                <span className="material-icons text-green-600 text-lg">check_circle</span>
+                <div>
+                    <p className="text-sm font-semibold text-green-800">Semua barang sudah dikembalikan</p>
+                    <p className="text-xs text-green-700">Tidak ada tabung, botol curah, atau regulator yang tercatat masih dipegang pelanggan ini.</p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-3">
+            <div className="flex items-start gap-2">
+                <span className="material-icons text-amber-600 text-lg">warning</span>
+                <div>
+                    <p className="text-sm font-semibold text-amber-800">Masih ada {ringkasan.totalBarang} barang tercatat dipegang</p>
+                    <p className="text-xs text-amber-700">Pastikan semuanya sudah kembali ke toko sebelum melanjutkan.</p>
+                </div>
+            </div>
+
+            {ringkasan.tabungBerkode.length > 0 && (
+                <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700 mb-1">Tabung Berkode</p>
+                    <ul className="space-y-1">
+                        {ringkasan.tabungBerkode.map(c => (
+                            <li key={c.id} className="text-xs text-gray-700 bg-white border border-amber-100 rounded px-2 py-1 flex justify-between gap-2">
+                                <span className="font-mono font-bold">{c.serialCode}</span>
+                                <span className="text-gray-500">{c.gasType} • {c.size}</span>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+
+            {ringkasan.curah.length > 0 && (
+                <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700 mb-1">Botol Curah</p>
+                    <ul className="space-y-1">
+                        {ringkasan.curah.map(h => (
+                            <li key={h.size} className="text-xs text-gray-700 bg-white border border-amber-100 rounded px-2 py-1">
+                                {h.qty} botol {h.size}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+
+            {ringkasan.regulator.length > 0 && (
+                <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700 mb-1">Regulator Sewa</p>
+                    <ul className="space-y-1">
+                        {ringkasan.regulator.map(r => (
+                            <li key={r.tariffId} className="text-xs text-gray-700 bg-white border border-amber-100 rounded px-2 py-1">
+                                {r.qty} unit {r.nama}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+        </div>
+    );
+};
+
+/** Centang pernyataan admin -- membuka tombol aksi yang sedang ditahan peringatan. */
+const PernyataanVerifikasi: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label: string }> = ({ checked, onChange, label }) => (
+    <label className="flex items-start gap-2 text-xs text-gray-700 bg-white border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50">
+        <input
+            type="checkbox"
+            checked={checked}
+            onChange={e => onChange(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-indigo-600"
+        />
+        <span>{label}</span>
+    </label>
+);
 
 export default MembersView;

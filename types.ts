@@ -122,7 +122,7 @@ export interface Transaction {
   cylinderId?: string; // Optional for DEBT_PAYMENT
   memberId?: string;
   refillStationId?: string; // For refill transactions
-  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEPOSIT_REFUND' | 'DELIVERY' | 'GAS_EXCHANGE';
+  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEPOSIT_REFUND' | 'DELIVERY' | 'GAS_EXCHANGE' | 'EXPENSE';
   date: string;
   rentalDuration?: number; // Days held (relevant for RETURN type)
   cost?: number; // Revenue only -- rental fee + gas + regulator. Deposit is NOT included.
@@ -143,6 +143,15 @@ export interface Transaction {
   // bisa dibedakan satu sama lain, jadi ukurannya disimpan langsung di sini.
   quantity?: number;
   size?: CylinderSize;
+
+  /**
+   * Keterangan bebas, hanya untuk baris EXPENSE.
+   *
+   * Baris lain selalu bisa dijelaskan lewat tabung, pelanggan, atau vendor yang
+   * direferensikannya. Pengeluaran operasional tidak punya ketiganya -- yang
+   * menjelaskannya cuma kalimat yang diketik admin.
+   */
+  description?: string;
 }
 
 /**

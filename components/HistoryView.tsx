@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Cylinder, Transaction, Member, RefillStation } from '../types';
 import { sebutanBarang } from '../lib/bulkStock';
+import { labelJenisTransaksi } from '../labels';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
@@ -197,6 +198,17 @@ const HistoryView: React.FC<HistoryViewProps> = ({ cylinders, members, stations 
                                     icon = 'swap_horiz';
                                     colorClass = 'text-teal-600 bg-teal-50';
                                     break;
+                                case 'EXPENSE':
+                                    description = `Biaya operasional: ${tx.description || 'tanpa keterangan'}`;
+                                    icon = 'receipt_long';
+                                    colorClass = 'text-rose-600 bg-rose-50';
+                                    break;
+                                default:
+                                    // Jenis yang belum dikenal tetap muncul dengan namanya sendiri --
+                                    // tanpa cabang ini barisnya kosong melompong.
+                                    description = `${labelJenisTransaksi(tx.type)} ${sebutanBarang(tx, cyl?.serialCode)}`;
+                                    icon = 'receipt_long';
+                                    colorClass = 'text-gray-600 bg-gray-100';
                             }
 
                             return (

@@ -221,9 +221,11 @@ const AdminView: React.FC<AdminViewProps> = ({ users, onAddUser, onUpdateUser, o
                             onChange={(e) => setEditingUser({...editingUser, role: e.target.value as UserRole})}
                             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
                         >
+                            {/* Peninjau dihapus dari pilihan -- perilakunya tidak pernah
+                                dibedakan dari Operator. Nilai enum-nya tetap ada supaya
+                                akun lama yang terlanjur berperan itu masih punya label. */}
                             <option value={UserRole.Operator}>Operator</option>
                             <option value={UserRole.Admin}>Administrator</option>
-                            <option value={UserRole.Viewer}>Peninjau</option>
                         </select>
                     </div>
                     

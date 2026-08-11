@@ -1,490 +1,405 @@
-import React, { useState, useMemo } from 'react';
-import { Cylinder, CylinderStatus, GasType, Transaction, Member, RefillStation, MemberStatus } from '../types';
+import React, { useMemo } from 'react';
+import { Cylinder, Transaction, Member, RefillStation, RentalTariff } from '../types';
 import { sebutanBarang } from '../lib/bulkStock';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import {
+  ItemTindakan,
+  KesiapanStok,
+  NadaTindakan,
+  RingkasanBon,
+  RingkasanSewa,
+  hitungAntrianTindakan,
+  hitungBon,
+  hitungKesiapanStok,
+  hitungSewaTerlama,
+} from '../lib/beranda';
+import { formatIDR, formatJam, formatTanggal, labelJenisTransaksi } from '../labels';
 import { useNavigate } from 'react-router-dom';
 
 interface DashboardProps {
-    cylinders: Cylinder[];
-    transactions: Transaction[];
-    members: Member[];
-    stations: RefillStation[];
+  cylinders: Cylinder[];
+  transactions: Transaction[];
+  members: Member[];
+  stations: RefillStation[];
+  tariffs: RentalTariff[];
 }
 
-const COLORS = ['#22c55e', '#3b82f6', '#f97316', '#eab308', '#ef4444', '#8b5cf6'];
+const KARTU = 'bg-white rounded-xl shadow-sm border border-gray-100';
 
-const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members, stations }) => {
-    const navigate = useNavigate();
-    const [overdueFilter, setOverdueFilter] = useState<'3m' | '6m' | '12m'>('3m');
+const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members, stations, tariffs }) => {
+  const navigate = useNavigate();
 
-    // -- Metrics Calculation --
-    const totalCylinders = cylinders.length;
-    const rentedCylinders = cylinders.filter(c => c.status === CylinderStatus.Rented).length;
-    const availableCylinders = cylinders.filter(c => c.status === CylinderStatus.Available).length;
-    const needRefill = cylinders.filter(c => c.status === CylinderStatus.EmptyRefill).length;
-    const refilling = cylinders.filter(c => c.status === CylinderStatus.Refilling).length;
-    const delivery = cylinders.filter(c => c.status === CylinderStatus.Delivery).length;
+  const antrian = useMemo(
+    () => hitungAntrianTindakan(cylinders, transactions, members, tariffs),
+    [cylinders, transactions, members, tariffs]);
 
-    // Tabung yang hilang atau belum pernah diberi status bukan kapasitas yang bisa
-    // disewakan, jadi tidak boleh jadi penyebut utilisasi -- kalau ikut dihitung,
-    // angkanya tertekan jauh di bawah kenyataan.
-    const untrackedCylinders = cylinders.filter(
-        c => !c.status || c.status === CylinderStatus.Unknown
-    ).length;
-    const trackedCylinders = totalCylinders - untrackedCylinders;
-    const utilizationRate = trackedCylinders > 0 ? Math.round((rentedCylinders / trackedCylinders) * 100) : 0;
+  const stok = useMemo(
+    () => hitungKesiapanStok(cylinders, transactions, tariffs),
+    [cylinders, transactions, tariffs]);
 
-    // -- Overdue / Long Term Logic --
-    const overdueData = useMemo(() => {
-        const rented = cylinders.filter(c => c.status === CylinderStatus.Rented);
-        return rented.map(c => {
-            // Find the latest rental transaction for this cylinder
-            const lastRentTx = transactions
-                .filter(t => t.cylinderId === c.id && t.type === 'RENTAL_OUT')
-                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+  const sewa = useMemo(
+    () => hitungSewaTerlama(cylinders, transactions, members),
+    [cylinders, transactions, members]);
 
-            if (!lastRentTx) return null;
+  const bon = useMemo(() => hitungBon(members), [members]);
 
-            const diffMs = new Date().getTime() - new Date(lastRentTx.date).getTime();
-            const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-            const member = members.find(m => m.id === c.currentHolder);
+  const aktivitasTerbaru = useMemo(
+    () => ringkasAktivitas(transactions, cylinders, members, stations),
+    [transactions, cylinders, members, stations]);
 
-            return {
-                id: c.id,
-                serialCode: c.serialCode,
-                gasType: c.gasType,
-                size: c.size,
-                member: member,
-                rentDate: lastRentTx.date,
-                days: days
-            };
-        })
-            .filter((item): item is NonNullable<typeof item> => item !== null)
-            .sort((a, b) => b.days - a.days); // Sort by longest duration first
-    }, [cylinders, transactions, members]);
+  return (
+    <div className="space-y-6 pb-20 md:pb-0 animate-fade-in-up">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-800">Beranda</h1>
+        <p className="text-sm text-gray-500">
+          {formatTanggal(new Date(), { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+        </p>
+      </div>
 
-    const filteredOverdue = overdueData.filter(item => {
-        if (overdueFilter === '12m') return item.days > 365;
-        if (overdueFilter === '6m') return item.days > 180;
-        return item.days > 90; // '3m' default
-    });
+      <AntrianTindakan antrian={antrian} onBuka={navigate} />
 
-    const longTermRentalsCount = overdueData.filter(i => i.days > 60).length; // Metric for card (> 2 months)
+      <KesiapanStokBlok stok={stok} />
 
-    // -- Refund Alerts --
-    const membersReadyForRefund = members.filter(m => {
-        if (m.status !== MemberStatus.Pending_Exit || !m.exitRequestDate) return false;
-        const requestDate = new Date(m.exitRequestDate);
-        const targetDate = new Date(requestDate);
-        targetDate.setDate(requestDate.getDate() + 14); // 2 weeks wait
-        const now = new Date();
-        return now >= targetDate;
-    });
-
-    // -- Chart Data --
-    const barData = Object.values(GasType).map(gas => {
-        return {
-            name: gas.split(' ')[0],
-            Total: cylinders.filter(c => c.gasType === gas).length,
-            Available: cylinders.filter(c => c.gasType === gas && c.status === CylinderStatus.Available).length
-        };
-    });
-
-    const pieData = [
-        { name: 'Tersedia', value: availableCylinders },
-        { name: 'Disewa', value: rentedCylinders },
-        { name: 'Kosong', value: needRefill },
-        { name: 'Sedang Diisi', value: refilling },
-        { name: 'Pengiriman', value: delivery },
-        { name: 'Rusak', value: cylinders.filter(c => c.status === CylinderStatus.Damaged).length },
-        { name: 'Tidak Diketahui', value: cylinders.filter(c => c.status === CylinderStatus.Unknown).length },
-    ].filter(d => d.value > 0);
-
-    // -- Recent Activity Logic --
-    const recentTransactions = [...transactions]
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, 5)
-        .map(tx => {
-            const cyl = cylinders.find(c => c.id === tx.cylinderId);
-            const member = members.find(m => m.id === tx.memberId);
-            const station = stations.find(s => s.id === tx.refillStationId);
-
-            let description = '';
-            let icon = '';
-            let colorClass = '';
-
-            switch (tx.type) {
-                case 'RENTAL_OUT':
-                    description = `Menyewakan ${sebutanBarang(tx, cyl?.serialCode)} ke ${member?.companyName}`;
-                    icon = 'shopping_cart_checkout';
-                    colorClass = 'text-blue-600 bg-blue-50';
-                    break;
-                case 'RETURN':
-                    description = `Menerima ${sebutanBarang(tx, cyl?.serialCode)} dari ${member?.companyName}`;
-                    icon = 'assignment_return';
-                    colorClass = 'text-green-600 bg-green-50';
-                    break;
-                case 'REFILL_OUT':
-                    description = `Mengirim ${sebutanBarang(tx, cyl?.serialCode)} ke ${station?.name}`;
-                    icon = 'local_shipping';
-                    colorClass = 'text-orange-600 bg-orange-50';
-                    break;
-                case 'REFILL_IN':
-                    description = `Menerima kembali ${sebutanBarang(tx, cyl?.serialCode)} dari isi ulang`;
-                    icon = 'inventory';
-                    colorClass = 'text-indigo-600 bg-indigo-50';
-                    break;
-                case 'DEPOSIT_REFUND':
-                    description = `Mengembalikan deposit ke ${member?.companyName}`;
-                    icon = 'savings';
-                    colorClass = 'text-purple-600 bg-purple-50';
-                    break;
-                case 'DEBT_PAYMENT':
-                    description = `Pembayaran utang dari ${member?.companyName}`;
-                    icon = 'payments';
-                    colorClass = 'text-emerald-600 bg-emerald-50';
-                    break;
-                case 'DELIVERY':
-                    description = `Mengirim ${sebutanBarang(tx, cyl?.serialCode)} untuk pengiriman`;
-                    icon = 'local_shipping';
-                    colorClass = 'text-cyan-600 bg-cyan-50';
-                    break;
-                case 'GAS_EXCHANGE':
-                    // memberId boleh kosong -- tukar isi terbuka untuk pembeli lepas.
-                    description = `Tukar isi ${sebutanBarang(tx)} ${member ? `untuk ${member.companyName}` : '(pembeli lepas)'}`;
-                    icon = 'swap_horiz';
-                    colorClass = 'text-teal-600 bg-teal-50';
-                    break;
-            }
-
-            return { ...tx, description, icon, colorClass };
-        });
-
-    // -- Low Stock Check --
-    // Hanya peringatkan gas yang memang ada di armada. Enum GasType punya 18+ nilai
-    // sementara toko cuma memegang 4, jadi tanpa saringan ini alert-nya menyebut
-    // setiap gas yang tidak pernah dimiliki dan jadi tidak ada gunanya.
-    const lowStockGases = Object.values(GasType).filter(gas => {
-        const total = cylinders.filter(c => c.gasType === gas).length;
-        if (total === 0) return false;
-        const avail = cylinders.filter(c => c.gasType === gas && c.status === CylinderStatus.Available).length;
-        return avail < 2; // Threshold
-    });
-
-    return (
-        <div className="space-y-6 animate-fade-in-up">
-
-            {/* Header & Alerts */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-800">Beranda</h1>
-                    <p className="text-sm text-gray-500">{new Date().toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-                </div>
-            </div>
-
-            {/* ACTIONABLE ALERTS SECTION */}
-            {(lowStockGases.length > 0 || membersReadyForRefund.length > 0) && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {lowStockGases.length > 0 && (
-                        <div className="flex items-center gap-3 bg-red-50 text-red-700 px-5 py-3 rounded-xl border border-red-100 shadow-sm animate-pulse">
-                            <div className="p-2 bg-red-100 rounded-lg">
-                                <span className="material-icons text-red-600">warning</span>
-                            </div>
-                            <div>
-                                <p className="font-bold text-sm">Stok Menipis</p>
-                                <p className="text-xs">Stok kritis untuk: {lowStockGases.map(g => g.split(' ')[0]).join(', ')}</p>
-                            </div>
-                        </div>
-                    )}
-                    {membersReadyForRefund.length > 0 && (
-                        <div onClick={() => navigate('/members')} className="cursor-pointer flex items-center justify-between gap-3 bg-green-50 text-green-700 px-5 py-3 rounded-xl border border-green-100 shadow-sm hover:bg-green-100 transition-colors">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-green-100 rounded-lg">
-                                    <span className="material-icons text-green-600">savings</span>
-                                </div>
-                                <div>
-                                    <p className="font-bold text-sm">Deposit Siap Dikembalikan</p>
-                                    <p className="text-xs">{membersReadyForRefund.length} pelanggan telah melewati masa tunggu.</p>
-                                </div>
-                            </div>
-                            <span className="material-icons text-green-400">chevron_right</span>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Stats Cards Row */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 transition-transform hover:-translate-y-1">
-                    <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg">
-                        <span className="material-icons text-2xl">inventory_2</span>
-                    </div>
-                    <div>
-                        <p className="text-sm text-gray-500 font-medium">Total Tabung</p>
-                        <p className="text-2xl font-bold text-gray-800">{totalCylinders}</p>
-                    </div>
-                </div>
-
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 transition-transform hover:-translate-y-1">
-                    <div className="p-3 bg-blue-50 text-blue-600 rounded-lg">
-                        <span className="material-icons text-2xl">pie_chart</span>
-                    </div>
-                    <div>
-                        <p className="text-sm text-gray-500 font-medium">Tingkat Pemakaian</p>
-                        <div className="flex items-baseline gap-2">
-                            <p className="text-2xl font-bold text-gray-800">{utilizationRate}%</p>
-                            <span className="text-xs text-gray-400">{rentedCylinders} / {trackedCylinders} terlacak</span>
-                        </div>
-                        {untrackedCylinders > 0 && (
-                            <p className="text-[11px] text-gray-400 mt-0.5">{untrackedCylinders} tabung belum terlacak</p>
-                        )}
-                    </div>
-                </div>
-
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 transition-transform hover:-translate-y-1">
-                    <div className="p-3 bg-green-50 text-green-600 rounded-lg">
-                        <span className="material-icons text-2xl">check_circle</span>
-                    </div>
-                    <div>
-                        <p className="text-sm text-gray-500 font-medium">Tersedia Sekarang</p>
-                        <p className="text-2xl font-bold text-gray-800">{availableCylinders}</p>
-                    </div>
-                </div>
-
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 transition-transform hover:-translate-y-1">
-                    <div className="p-3 bg-orange-50 text-orange-600 rounded-lg">
-                        <span className="material-icons text-2xl">local_gas_station</span>
-                    </div>
-                    <div>
-                        <p className="text-sm text-gray-500 font-medium">Perlu Isi Ulang</p>
-                        <p className="text-2xl font-bold text-gray-800">{needRefill}</p>
-                    </div>
-                </div>
-
-                {/* Long Term Rentals Card */}
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 transition-transform hover:-translate-y-1">
-                    <div className="p-3 bg-purple-50 text-purple-600 rounded-lg">
-                        <span className="material-icons text-2xl">watch_later</span>
-                    </div>
-                    <div>
-                        <p className="text-sm text-gray-500 font-medium">Sewa Jangka Panjang</p>
-                        <div className="flex items-baseline gap-2">
-                            <p className="text-2xl font-bold text-gray-800">{longTermRentalsCount}</p>
-                            <span className="text-xs text-purple-400 font-medium">{'>'} 2 mo</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Main Content Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-                {/* Charts Section (Left 2 cols) */}
-                <div className="lg:col-span-2 space-y-6">
-
-                    {/* Long Duration Rentals List (New Feature) */}
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                        <div className="p-6 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                                <span className="material-icons text-red-500 text-sm">history_toggle_off</span>
-                                Sewa Berdurasi Panjang
-                            </h3>
-                            <div className="flex bg-gray-100 p-1 rounded-lg">
-                                <button
-                                    onClick={() => setOverdueFilter('3m')}
-                                    className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${overdueFilter === '3m' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                                >
-                                    {'>'} 3 Bulan
-                                </button>
-                                <button
-                                    onClick={() => setOverdueFilter('6m')}
-                                    className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${overdueFilter === '6m' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                                >
-                                    {'>'} 6 Bulan
-                                </button>
-                                <button
-                                    onClick={() => setOverdueFilter('12m')}
-                                    className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${overdueFilter === '12m' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                                >
-                                    {'>'} 1 Tahun
-                                </button>
-                            </div>
-                        </div>
-
-                        {filteredOverdue.length > 0 ? (
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-gray-50 text-gray-500 font-medium">
-                                        <tr>
-                                            <th className="px-6 py-3">Tabung</th>
-                                            <th className="px-6 py-3">Pelanggan</th>
-                                            <th className="px-6 py-3">Tanggal Sewa</th>
-                                            <th className="px-6 py-3 text-right">Durasi</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-100">
-                                        {filteredOverdue.slice(0, 5).map(item => (
-                                            <tr key={item.id} className="hover:bg-gray-50 group">
-                                                <td className="px-6 py-3">
-                                                    <p className="font-bold font-mono text-gray-800 text-xs">{item.serialCode}</p>
-                                                    <p className="text-[10px] text-gray-500">{item.gasType}</p>
-                                                </td>
-                                                <td className="px-6 py-3 text-gray-700 text-xs font-medium">
-                                                    {item.member?.companyName || 'Unknown'}
-                                                </td>
-                                                <td className="px-6 py-3 text-gray-500 text-xs">
-                                                    {new Date(item.rentDate).toLocaleDateString('id-ID')}
-                                                </td>
-                                                <td className="px-6 py-3 text-right">
-                                                    <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${item.days > 365 ? 'bg-red-100 text-red-700' :
-                                                            item.days > 180 ? 'bg-orange-100 text-orange-700' :
-                                                                'bg-yellow-100 text-yellow-800'
-                                                        }`}>
-                                                        {item.days} hari
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                                {filteredOverdue.length > 5 && (
-                                    <div className="p-2 text-center border-t border-gray-100 bg-gray-50">
-                                        <button onClick={() => navigate('/inventory')} className="text-xs text-indigo-600 font-bold hover:underline">
-                                            Lihat semua {filteredOverdue.length} tabung terlambat
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="p-8 text-center text-gray-400 text-sm bg-white">
-                                <span className="material-icons text-3xl mb-2 text-green-200">check_circle</span>
-                                <p>Tidak ada tabung yang cocok dengan durasi ini.</p>
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                        <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
-                            <span className="material-icons text-gray-400 text-sm">bar_chart</span>
-                            Tingkat Persediaan
-                        </h3>
-                        <div className="h-64">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={barData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                    <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                                    <YAxis tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                                    <Tooltip
-                                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                        cursor={{ fill: '#f8fafc' }}
-                                    />
-                                    <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} />
-                                    <Bar dataKey="Total" name="Total" fill="#e2e8f0" radius={[4, 4, 0, 0]} barSize={30} />
-                                    <Bar dataKey="Available" name="Tersedia" fill="#22c55e" radius={[4, 4, 0, 0]} barSize={30} />
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-
-                    {/* Recent Activity Feed */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                                <span className="material-icons text-gray-400 text-sm">history</span>
-                                Aktivitas Terbaru
-                            </h3>
-                            <button onClick={() => navigate('/history')} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">Lihat Semua</button>
-                        </div>
-                        <div className="space-y-4">
-                            {recentTransactions.length > 0 ? (
-                                recentTransactions.map(tx => (
-                                    <div key={tx.id} className="flex items-start gap-4 pb-4 border-b border-gray-50 last:border-0 last:pb-0">
-                                        <div className={`p-2 rounded-full flex-shrink-0 mt-1 ${tx.colorClass}`}>
-                                            <span className="material-icons text-sm">{tx.icon}</span>
-                                        </div>
-                                        <div>
-                                            <p className="text-sm font-medium text-gray-800">{tx.description}</p>
-                                            <p className="text-xs text-gray-400 mt-1">
-                                                {new Date(tx.date).toLocaleDateString('id-ID')} • {new Date(tx.date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                                            </p>
-                                        </div>
-                                    </div>
-                                ))
-                            ) : (
-                                <div className="text-center text-gray-400 py-6 text-sm">Belum ada aktivitas</div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Right Column: Quick Actions & Secondary Charts */}
-                <div className="space-y-6">
-
-                    {/* Quick Actions Panel */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Aksi Cepat</h3>
-                        <div className="grid grid-cols-2 gap-3">
-                            <button
-                                onClick={() => navigate('/rental')}
-                                className="flex flex-col items-center justify-center p-4 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors border border-blue-100"
-                            >
-                                <span className="material-icons mb-2">shopping_cart</span>
-                                <span className="text-sm font-semibold">Sewa Keluar</span>
-                            </button>
-                            <button
-                                onClick={() => navigate('/rental')}
-                                className="flex flex-col items-center justify-center p-4 rounded-xl bg-green-50 text-green-700 hover:bg-green-100 transition-colors border border-green-100"
-                            >
-                                <span className="material-icons mb-2">assignment_return</span>
-                                <span className="text-sm font-semibold">Pengembalian</span>
-                            </button>
-                            <button
-                                onClick={() => navigate('/delivery')}
-                                className="flex flex-col items-center justify-center p-4 rounded-xl bg-orange-50 text-orange-700 hover:bg-orange-100 transition-colors border border-orange-100"
-                            >
-                                <span className="material-icons mb-2">local_shipping</span>
-                                <span className="text-sm font-semibold">Pengiriman</span>
-                            </button>
-                            <button
-                                onClick={() => navigate('/inventory')}
-                                className="flex flex-col items-center justify-center p-4 rounded-xl bg-gray-50 text-gray-700 hover:bg-gray-100 transition-colors border border-gray-200"
-                            >
-                                <span className="material-icons mb-2">add_box</span>
-                                <span className="text-sm font-semibold">Tambah Stok</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Pie Chart: Status Distribution */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center">
-                        <h3 className="text-lg font-bold text-gray-800 mb-2 w-full text-left">Status Tabung</h3>
-                        <div className="h-48 w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={pieData}
-                                        cx="50%"
-                                        cy="50%"
-                                        innerRadius={40}
-                                        outerRadius={70}
-                                        paddingAngle={5}
-                                        dataKey="value"
-                                    >
-                                        {pieData.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                    <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                                </PieChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        <div className="lg:col-span-2">
+          <TabungDiPelanggan sewa={sewa} onBuka={() => navigate('/inventory')} />
         </div>
-    );
+
+        <div className="space-y-6">
+          <AksiCepat onBuka={navigate} />
+          <BonPelanggan bon={bon} onBuka={() => navigate('/members')} />
+        </div>
+      </div>
+
+      <AktivitasTerbaru aktivitas={aktivitasTerbaru} onLihatSemua={() => navigate('/history')} />
+    </div>
+  );
 };
+
+// ------------------------------------------------------------------ Perlu tindakan
+
+const NADA: Record<NadaTindakan, { wadah: string; ikon: string }> = {
+  bahaya: { wadah: 'bg-red-50 border-red-100 hover:bg-red-100', ikon: 'bg-red-100 text-red-600' },
+  peringatan: { wadah: 'bg-amber-50 border-amber-100 hover:bg-amber-100', ikon: 'bg-amber-100 text-amber-600' },
+  info: { wadah: 'bg-green-50 border-green-100 hover:bg-green-100', ikon: 'bg-green-100 text-green-600' },
+};
+
+const AntrianTindakan: React.FC<{ antrian: ItemTindakan[]; onBuka: (tujuan: string) => void }> = ({ antrian, onBuka }) => (
+  <div className={`${KARTU} p-6`}>
+    <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Perlu Tindakan</h2>
+
+    {antrian.length === 0 ? (
+      <div className="flex items-center gap-3 text-gray-500">
+        <span className="material-icons text-green-500">check_circle</span>
+        <p className="text-sm">Tidak ada yang perlu ditindak hari ini.</p>
+      </div>
+    ) : (
+      <div className="space-y-2">
+        {antrian.map(item => {
+          const nada = NADA[item.nada];
+          return (
+            <button
+              key={item.id}
+              onClick={() => onBuka(item.tujuan)}
+              className={`w-full text-left flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${nada.wadah}`}
+            >
+              <span className={`shrink-0 p-2 rounded-lg ${nada.ikon}`}>
+                <span className="material-icons text-lg align-middle">{item.ikon}</span>
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-sm font-bold text-gray-800">{item.teks}</span>
+                {item.detail && <span className="block text-xs text-gray-600 truncate">{item.detail}</span>}
+              </span>
+              <span className="material-icons text-gray-400 shrink-0">chevron_right</span>
+            </button>
+          );
+        })}
+      </div>
+    )}
+  </div>
+);
+
+// ------------------------------------------------------------------- Kesiapan stok
+
+const UBIN = [
+  { kunci: 'siapSewa' as const, label: 'Siap Sewa', ikon: 'check_circle', warna: 'bg-green-50 text-green-600' },
+  { kunci: 'kosongPerluIsi' as const, label: 'Kosong', ikon: 'local_gas_station', warna: 'bg-orange-50 text-orange-600' },
+  { kunci: 'diVendor' as const, label: 'Di Vendor', ikon: 'factory', warna: 'bg-yellow-50 text-yellow-600' },
+  { kunci: 'dalamPengiriman' as const, label: 'Pengiriman', ikon: 'local_shipping', warna: 'bg-cyan-50 text-cyan-600' },
+];
+
+const KesiapanStokBlok: React.FC<{ stok: KesiapanStok }> = ({ stok }) => (
+  <div className={`${KARTU} p-6 space-y-5`}>
+    <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Kesiapan Stok</h2>
+
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {UBIN.map(u => (
+        <div key={u.kunci} className="flex items-center gap-3">
+          <span className={`shrink-0 p-3 rounded-xl ${u.warna}`}>
+            <span className="material-icons align-middle">{u.ikon}</span>
+          </span>
+          <div className="min-w-0">
+            <p className="text-2xl font-bold text-gray-800 leading-tight">{stok[u.kunci]}</p>
+            <p className="text-xs text-gray-500">{u.label}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+
+    {(stok.curah.length > 0 || stok.regulator.length > 0) && (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-gray-100">
+        {stok.curah.length > 0 && (
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2">Botol Curah</p>
+            <ul className="space-y-1">
+              {stok.curah.map(c => (
+                <li key={`${c.gasType}-${c.size}`} className="text-sm text-gray-700 flex justify-between items-baseline gap-2">
+                  <span className="text-gray-500 truncate min-w-0">{c.gasType} {c.size}</span>
+                  <span className="font-bold shrink-0 whitespace-nowrap">{c.qty} botol</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {stok.regulator.length > 0 && (
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2">Regulator</p>
+            <ul className="space-y-1">
+              {stok.regulator.map(r => (
+                <li key={r.nama} className="text-sm text-gray-700 flex justify-between items-baseline gap-2">
+                  <span className="text-gray-500 truncate min-w-0">{r.nama}</span>
+                  <span className="font-bold shrink-0 whitespace-nowrap">
+                    {r.tersediaSewa} sewa <span className="text-gray-300">·</span> {r.stokBaru} baru
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    )}
+  </div>
+);
+
+// -------------------------------------------------------------- Tabung di pelanggan
+
+const TabungDiPelanggan: React.FC<{ sewa: RingkasanSewa; onBuka: () => void }> = ({ sewa, onBuka }) => (
+  <div className={`${KARTU} overflow-hidden`}>
+    <div className="p-6 border-b border-gray-100 flex items-start justify-between gap-4">
+      <div>
+        <h2 className="font-bold text-gray-800">Tabung di Tangan Pelanggan</h2>
+        <p className="text-sm text-gray-500 mt-0.5">{sewa.totalDisewa} tabung sedang disewa</p>
+      </div>
+      {sewa.lewatAmbang > 0 && (
+        <span className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg bg-red-50 text-red-700 border border-red-100">
+          {sewa.lewatAmbang} lebih dari {sewa.ambangHari} hari
+        </span>
+      )}
+    </div>
+
+    {sewa.terlama.length > 0 ? (
+      <>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-gray-50 text-gray-500">
+              <tr>
+                <th className="px-6 py-2 font-medium">Tabung</th>
+                <th className="px-6 py-2 font-medium">Pelanggan</th>
+                <th className="px-6 py-2 font-medium">Tanggal Sewa</th>
+                <th className="px-6 py-2 font-medium text-right">Durasi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {sewa.terlama.map(b => (
+                <tr key={b.cylinderId} className="hover:bg-gray-50">
+                  <td className="px-6 py-3">
+                    <p className="font-mono font-bold text-gray-700">{b.serialCode}</p>
+                    <p className="text-[10px] text-gray-400">{b.gasType}</p>
+                  </td>
+                  <td className="px-6 py-3 text-gray-700">{b.namaPelanggan}</td>
+                  <td className="px-6 py-3 text-gray-500">{formatTanggal(b.tanggalSewa)}</td>
+                  <td className="px-6 py-3 text-right">
+                    <span
+                      className={`text-[10px] font-bold px-2 py-1 rounded-full ${
+                        b.hari > sewa.ambangHari ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'
+                      }`}
+                    >
+                      {b.hari} hari
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <button
+          onClick={onBuka}
+          className="w-full px-6 py-3 text-sm font-medium text-indigo-600 hover:bg-indigo-50 border-t border-gray-100"
+        >
+          Buka Stok Tabung
+        </button>
+      </>
+    ) : (
+      <div className="p-8 text-center">
+        <span className="material-icons text-4xl text-green-500 mb-2 block">check_circle</span>
+        <p className="text-sm text-gray-500">Tidak ada tabung yang sedang disewa.</p>
+      </div>
+    )}
+  </div>
+);
+
+// ----------------------------------------------------------------------- Aksi cepat
+
+// Sewa dan pengembalian dilayani satu layar yang sama di RentalForm -- keranjang sewa
+// dan daftar kembali ada berdampingan di sana, jadi satu tombol saja.
+const AKSI = [
+  { label: 'Sewa & Kembali', ikon: 'shopping_cart', tujuan: '/rental', warna: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' },
+  { label: 'Tukar Isi', ikon: 'swap_horiz', tujuan: '/tukar-isi', warna: 'bg-teal-50 text-teal-600 hover:bg-teal-100' },
+  { label: 'Pengiriman', ikon: 'local_shipping', tujuan: '/delivery', warna: 'bg-cyan-50 text-cyan-600 hover:bg-cyan-100' },
+  { label: 'Isi Ulang', ikon: 'local_gas_station', tujuan: '/refill', warna: 'bg-orange-50 text-orange-600 hover:bg-orange-100' },
+];
+
+const AksiCepat: React.FC<{ onBuka: (tujuan: string) => void }> = ({ onBuka }) => (
+  <div className={`${KARTU} p-6`}>
+    <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Aksi Cepat</h2>
+    <div className="grid grid-cols-2 gap-3">
+      {AKSI.map(a => (
+        <button
+          key={a.tujuan}
+          onClick={() => onBuka(a.tujuan)}
+          className={`flex flex-col items-center justify-center gap-1 p-4 rounded-xl transition-colors ${a.warna}`}
+        >
+          <span className="material-icons">{a.ikon}</span>
+          <span className="text-xs font-bold text-center">{a.label}</span>
+        </button>
+      ))}
+    </div>
+  </div>
+);
+
+// --------------------------------------------------------------------------- Bon
+
+const BonPelanggan: React.FC<{ bon: RingkasanBon; onBuka: () => void }> = ({ bon, onBuka }) => (
+  <div className={`${KARTU} p-6`}>
+    <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Bon Pelanggan</h2>
+
+    {bon.pelanggan.length === 0 ? (
+      <div className="flex items-center gap-3 text-gray-500">
+        <span className="material-icons text-green-500">check_circle</span>
+        <p className="text-sm">Tidak ada bon yang belum lunas.</p>
+      </div>
+    ) : (
+      <>
+        <p className="text-2xl font-bold text-red-600">{formatIDR(bon.total)}</p>
+        <p className="text-xs text-gray-500 mb-4">dari {bon.pelanggan.length} pelanggan</p>
+
+        <ul className="space-y-2">
+          {bon.pelanggan.map(p => (
+            <li key={p.id} className="flex justify-between items-center gap-2 text-sm">
+              <span className="text-gray-700 truncate">{p.nama}</span>
+              <span className="font-bold text-gray-800 shrink-0">{formatIDR(p.jumlah)}</span>
+            </li>
+          ))}
+        </ul>
+
+        <button onClick={onBuka} className="mt-4 text-sm font-medium text-indigo-600 hover:underline">
+          Buka Data Pelanggan
+        </button>
+      </>
+    )}
+  </div>
+);
+
+// --------------------------------------------------------------------- Aktivitas
+
+interface BarisAktivitas {
+  id: string;
+  tanggal: string;
+  keterangan: string;
+  ikon: string;
+  warna: string;
+}
+
+/** Lima transaksi terakhir, sudah diterjemahkan jadi kalimat yang bisa dibaca. */
+function ringkasAktivitas(
+  transactions: Transaction[],
+  cylinders: Cylinder[],
+  members: Member[],
+  stations: RefillStation[]
+): BarisAktivitas[] {
+  const terakhir = [...transactions]
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 5);
+
+  return terakhir.map(tx => {
+    const cyl = cylinders.find(c => c.id === tx.cylinderId);
+    const member = members.find(m => m.id === tx.memberId);
+    const station = stations.find(s => s.id === tx.refillStationId);
+    const barang = sebutanBarang(tx, cyl?.serialCode);
+
+    switch (tx.type) {
+      case 'RENTAL_OUT':
+        return baris(tx, `Menyewakan ${barang} ke ${member?.companyName}`, 'shopping_cart_checkout', 'text-blue-600 bg-blue-50');
+      case 'RETURN':
+        return baris(tx, `Menerima ${barang} dari ${member?.companyName}`, 'assignment_return', 'text-green-600 bg-green-50');
+      case 'REFILL_OUT':
+        return baris(tx, `Mengirim ${barang} ke ${station?.name}`, 'local_shipping', 'text-orange-600 bg-orange-50');
+      case 'REFILL_IN':
+        return baris(tx, `Menerima kembali ${barang} dari isi ulang`, 'inventory', 'text-indigo-600 bg-indigo-50');
+      case 'DEPOSIT_REFUND':
+        return baris(tx, `Mengembalikan deposit ke ${member?.companyName}`, 'savings', 'text-purple-600 bg-purple-50');
+      case 'DEBT_PAYMENT':
+        return baris(tx, `Pembayaran utang dari ${member?.companyName}`, 'payments', 'text-emerald-600 bg-emerald-50');
+      case 'DELIVERY':
+        return baris(tx, `Mengirim ${barang} untuk pengiriman`, 'local_shipping', 'text-cyan-600 bg-cyan-50');
+      case 'GAS_EXCHANGE':
+        // memberId boleh kosong -- tukar isi terbuka untuk pembeli lepas.
+        return baris(tx, `Tukar isi ${sebutanBarang(tx)} ${member ? `untuk ${member.companyName}` : '(pembeli lepas)'}`, 'swap_horiz', 'text-teal-600 bg-teal-50');
+      case 'EXPENSE':
+        return baris(tx, `Biaya operasional: ${tx.description || 'tanpa keterangan'}`, 'receipt_long', 'text-rose-600 bg-rose-50');
+      default:
+        // Jenis yang belum dikenal tetap muncul dengan namanya sendiri, bukan
+        // gelembung kosong tanpa teks.
+        return baris(tx, `${labelJenisTransaksi(tx.type)} ${barang}`, 'receipt_long', 'text-gray-600 bg-gray-100');
+    }
+  });
+}
+
+const baris = (tx: Transaction, keterangan: string, ikon: string, warna: string): BarisAktivitas => ({
+  id: tx.id,
+  tanggal: tx.date,
+  keterangan,
+  ikon,
+  warna,
+});
+
+const AktivitasTerbaru: React.FC<{ aktivitas: BarisAktivitas[]; onLihatSemua: () => void }> = ({ aktivitas, onLihatSemua }) => (
+  <div className={`${KARTU} p-6`}>
+    <div className="flex justify-between items-center mb-4">
+      <h2 className="font-bold text-gray-800">Aktivitas Terbaru</h2>
+      <button onClick={onLihatSemua} className="text-sm font-medium text-indigo-600 hover:underline">
+        Lihat Semua
+      </button>
+    </div>
+
+    {aktivitas.length === 0 ? (
+      <p className="text-sm text-gray-400 italic">Belum ada aktivitas.</p>
+    ) : (
+      <div className="space-y-4">
+        {aktivitas.map(a => (
+          <div key={a.id} className="flex items-start gap-4 pb-4 border-b border-gray-50 last:border-0 last:pb-0">
+            <span className={`shrink-0 p-2 rounded-full ${a.warna}`}>
+              <span className="material-icons text-lg align-middle">{a.ikon}</span>
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm text-gray-700">{a.keterangan}</p>
+              <p className="text-xs text-gray-400">{formatTanggal(a.tanggal)} • {formatJam(a.tanggal)}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+);
 
 export default Dashboard;
