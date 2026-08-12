@@ -163,6 +163,18 @@ export interface Transaction {
    * menjelaskannya cuma kalimat yang diketik admin.
    */
   description?: string;
+
+  /**
+   * Penanda pembatalan. Transaksi yang salah catat dibatalkan, bukan dihapus --
+   * ini catatan uang orang, jadi jejaknya ditahan.
+   *
+   * App menyaring baris ber-voidedAt saat memuat data, sehingga seluruh
+   * perhitungan stok dan laporan otomatis mengabaikannya tanpa perlu tahu soal
+   * pembatalan. Karena itu kolom ini hampir tidak pernah terlihat di komponen.
+   */
+  voidedAt?: string;
+  voidedBy?: string;
+  voidReason?: string;
 }
 
 /**

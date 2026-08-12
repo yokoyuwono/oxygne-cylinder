@@ -21,3 +21,32 @@ export const bolehLihatKeuanganPenuh = (peran?: UserRole) => peran === UserRole.
 
 /** Tambah, hapus, dan ubah peran akun staf. */
 export const bolehKelolaPengguna = (peran?: UserRole) => peran === UserRole.Admin;
+
+/**
+ * Jenis transaksi yang punya jalur pembalikan lengkap di batalkan_transaksi().
+ *
+ * Sisanya sengaja tidak ditawarkan tombolnya: isi ulang, pengiriman, pembayaran
+ * utang, dan pengembalian deposit mengubah kolom tersimpan yang pembalikannya belum
+ * ditulis, dan membalik separuh lebih berbahaya daripada tidak membalik sama sekali.
+ */
+export const JENIS_BISA_DIBATALKAN = ['RENTAL_OUT', 'RETURN', 'GAS_EXCHANGE'];
+
+/**
+ * Boleh membatalkan transaksi ini?
+ *
+ * Operator sebatas transaksi hari ini -- salah ketik ketahuan dalam hitungan menit,
+ * jadi tidak perlu menunggu siapa pun; membongkar catatan lama urusan lain.
+ * Administrator bebas.
+ *
+ * Ini penjaga tampilan saja. Aturan yang sebenarnya berlaku ada di dalam fungsi
+ * batalkan_transaksi() di database, yang memeriksa ulang peran dan tanggalnya.
+ */
+export const bolehBatalkanTransaksi = (
+  peran: UserRole | undefined,
+  jenis: string,
+  tanggalTransaksi: string,
+  tanggalHariIni: string
+) => {
+  if (!JENIS_BISA_DIBATALKAN.includes(jenis)) return false;
+  return peran === UserRole.Admin || tanggalTransaksi === tanggalHariIni;
+};

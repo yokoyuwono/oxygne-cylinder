@@ -19,16 +19,27 @@ export const isSupabaseConfigured = !!supabaseUrl && !!supabaseKey && supabaseUr
  * Helper to fetch ALL records from a table, bypassing the default 1000 row limit
  * by automatically paginating through all available records.
  */
-export async function fetchAllRecords<T>(tableName: string, select = '*'): Promise<T[]> {
+export async function fetchAllRecords<T>(
+    tableName: string,
+    select = '*',
+    /**
+     * Saringan opsional yang dipasang pada query, mis. membuang baris yang sudah
+     * dibatalkan. Diterapkan di sini supaya seluruh pemakai data ikut tersaring
+     * dari satu tempat -- menyaringnya di tiap komponen menyisakan risiko satu
+     * tempat terlewat, dan angkanya lalu salah tanpa error apa pun.
+     */
+    saring?: (q: any) => any
+): Promise<T[]> {
     let allData: T[] = [];
     let from = 0;
     const step = 1000;
     let hasMore = true;
 
     while (hasMore) {
-        const { data, error } = await supabase
-            .from(tableName)
-            .select(select)
+        let q = supabase.from(tableName).select(select);
+        if (saring) q = saring(q);
+
+        const { data, error } = await q
             .range(from, from + step - 1)
             .order('id' as any, { ascending: true });
 

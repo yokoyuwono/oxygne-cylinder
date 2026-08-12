@@ -2,8 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Cylinder, Transaction, Member, RefillStation, GasType, CylinderStatus, UserRole } from '../types';
 import { formatIDR, labelJenisTransaksi, labelStatusBayar } from '../labels';
 import { sebutanBarang } from '../lib/bulkStock';
-import { bolehLihatKeuanganPenuh } from '../lib/peran';
-import { hariIni, hitungLaporanHarian } from '../lib/laporanHarian';
+import { bolehBatalkanTransaksi, bolehLihatKeuanganPenuh } from '../lib/peran';
+import { hariIni, hitungLaporanHarian, tanggalLokal } from '../lib/laporanHarian';
 import { usePaginasi } from '../lib/usePaginasi';
 import Paginasi from './Paginasi';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
@@ -14,6 +14,7 @@ interface ReportsViewProps {
   members: Member[];
   stations: RefillStation[];
   role?: UserRole;
+  onBatalkanTransaksi?: (id: string, alasan: string) => Promise<void>;
 }
 
 const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
@@ -82,7 +83,7 @@ const DeliveryManifestCard: React.FC<{ date: string, txs: Transaction[], petaTab
   );
 };
 
-const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, members, stations, role }) => {
+const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, members, stations, role, onBatalkanTransaksi }) => {
   // Rekap menyeluruh -- total, tren bulanan, laba, peringkat pelanggan -- hanya untuk
   // Administrator. Peran lain melihat keuangan sehari demi sehari lewat tab Harian.
   const bolehRekapPenuh = bolehLihatKeuanganPenuh(role);
@@ -115,6 +116,38 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
   const petaTabung = useMemo(() => new Map(cylinders.map(c => [c.id, c])), [cylinders]);
   const petaPelanggan = useMemo(() => new Map(members.map(m => [m.id, m])), [members]);
   const petaVendor = useMemo(() => new Map(stations.map(s => [s.id, s])), [stations]);
+
+  // -- Pembatalan transaksi --
+  const [akanDibatalkan, setAkanDibatalkan] = useState<Transaction | null>(null);
+  const [alasanBatal, setAlasanBatal] = useState('');
+  const [sedangBatal, setSedangBatal] = useState(false);
+  const [gagalBatal, setGagalBatal] = useState('');
+
+  const hariIniLokal = hariIni();
+  const bisaDibatalkan = (t: Transaction) =>
+    Boolean(onBatalkanTransaksi) &&
+    bolehBatalkanTransaksi(role, t.type, tanggalLokal(t.date), hariIniLokal);
+
+  const bukaBatal = (t: Transaction) => {
+    setAkanDibatalkan(t);
+    setAlasanBatal('');
+    setGagalBatal('');
+  };
+
+  const jalankanBatal = async () => {
+    if (!akanDibatalkan || !onBatalkanTransaksi) return;
+
+    setGagalBatal('');
+    setSedangBatal(true);
+    try {
+      await onBatalkanTransaksi(akanDibatalkan.id, alasanBatal);
+      setAkanDibatalkan(null);
+    } catch (err) {
+      setGagalBatal(err instanceof Error ? err.message : 'Gagal membatalkan transaksi.');
+    } finally {
+      setSedangBatal(false);
+    }
+  };
 
   // -- Data Processing: Inventory --
   const totalCylinders = cylinders.length;
@@ -271,8 +304,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
       const code = cyl?.serialCode || 'Tidak diketahui';
 
       switch(t.type) {
-          case 'RENTAL_OUT': return { title: `Menyewakan ${code}`, subtitle: `Ke ${member?.companyName}`, icon: 'shopping_cart', color: 'bg-blue-100 text-blue-600', badge: 'SEWA' };
-          case 'RETURN': return { title: `Dikembalikan ${code}`, subtitle: `Dari ${member?.companyName}`, icon: 'assignment_return', color: 'bg-green-100 text-green-600', badge: 'KEMBALI' };
+          // sebutanBarang, bukan `code`: baris curah dan regulator tidak punya kode
+          // seri, jadi memakai code menghasilkan "Menyewakan Tidak diketahui" --
+          // menyesatkan di daftar, dan berbahaya di dialog konfirmasi pembatalan.
+          case 'RENTAL_OUT': return { title: `Menyewakan ${sebutanBarang(t, cyl?.serialCode)}`, subtitle: `Ke ${member?.companyName}`, icon: 'shopping_cart', color: 'bg-blue-100 text-blue-600', badge: 'SEWA' };
+          case 'RETURN': return { title: `Dikembalikan ${sebutanBarang(t, cyl?.serialCode)}`, subtitle: `Dari ${member?.companyName}`, icon: 'assignment_return', color: 'bg-green-100 text-green-600', badge: 'KEMBALI' };
           case 'REFILL_OUT': return { title: `Kirim Isi Ulang ${code}`, subtitle: `Ke ${station?.name}`, icon: 'local_shipping', color: 'bg-orange-100 text-orange-600', badge: 'KIRIM' };
           case 'REFILL_IN': return { title: `Diterima Kembali ${code}`, subtitle: tampilkanNominal ? `Biaya: ${t.cost ? formatIDR(t.cost) : '-'}` : `Dari ${station?.name || 'isi ulang'}`, icon: 'inventory_2', color: 'bg-indigo-100 text-indigo-600', badge: 'TERIMA' };
           case 'DEBT_PAYMENT': return { title: 'Pembayaran Utang', subtitle: `Dari ${member?.companyName}`, icon: 'payments', color: 'bg-teal-100 text-teal-600', badge: 'BAYAR' };
@@ -777,6 +813,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                             <th className="px-6 py-3 font-semibold text-gray-700">Pihak Terkait</th>
                                             {bolehRekapPenuh && <th className="px-6 py-3 font-semibold text-gray-700 text-right">Jumlah</th>}
                                             <th className="px-6 py-3 font-semibold text-gray-700 text-right">Status</th>
+                                            <th className="px-6 py-3 font-semibold text-gray-700 text-right w-12"></th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
@@ -830,6 +867,17 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                                             <span className="text-gray-400">-</span>
                                                         )}
                                                     </td>
+                                                    <td className="px-3 py-4 text-right">
+                                                        {bisaDibatalkan(t) && (
+                                                            <button
+                                                                onClick={() => bukaBatal(t)}
+                                                                title="Batalkan transaksi ini"
+                                                                className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                                            >
+                                                                <span className="material-icons text-base">undo</span>
+                                                            </button>
+                                                        )}
+                                                    </td>
                                                 </tr>
                                             );
                                         })}
@@ -875,11 +923,20 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                         )}
                                     </div>
                                 </div>
-                                {bolehRekapPenuh && t.cost && (
-                                    <div className="text-right">
+                                <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                                    {bolehRekapPenuh && t.cost && (
                                         <span className="block font-bold text-gray-700 text-sm">{formatIDR(t.cost)}</span>
-                                    </div>
-                                )}
+                                    )}
+                                    {bisaDibatalkan(t) && (
+                                        <button
+                                            onClick={() => bukaBatal(t)}
+                                            className="min-h-[36px] px-2 rounded-lg text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors flex items-center gap-1"
+                                        >
+                                            <span className="material-icons text-sm">undo</span>
+                                            Batalkan
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                           );
                         })}
@@ -901,6 +958,75 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                   )}
               </div>
           </div>
+      )}
+
+      {/* DIALOG PEMBATALAN */}
+      {akanDibatalkan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-fade-in-up">
+            <div className="bg-red-600 px-6 py-4 flex justify-between items-center text-white">
+              <h3 className="font-bold flex items-center gap-2">
+                <span className="material-icons">undo</span>
+                Batalkan Transaksi
+              </h3>
+              <button onClick={() => setAkanDibatalkan(null)} className="text-red-100 hover:text-white">
+                <span className="material-icons">close</span>
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="text-sm text-gray-700 space-y-1">
+                <p className="font-bold">{getTxDescription(akanDibatalkan, bolehRekapPenuh).title}</p>
+                <p className="text-xs text-gray-500">
+                  {new Date(akanDibatalkan.date).toLocaleString('id-ID')}
+                  {bolehRekapPenuh && akanDibatalkan.cost ? ` • ${formatIDR(akanDibatalkan.cost)}` : ''}
+                </p>
+              </div>
+
+              {/* Disebut apa adanya: yang membuat pembatalan berguna sekaligus berisiko
+                  adalah efek sampingnya, bukan hilangnya baris ini dari daftar. */}
+              <p className="text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Stok, status tabung, deposit, dan bon pelanggan yang terpengaruh akan
+                dikembalikan seperti sebelum transaksi ini dicatat. Barisnya tetap
+                tersimpan sebagai riwayat, tapi tidak lagi dihitung di laporan mana pun.
+              </p>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Alasan (opsional)</label>
+                <input
+                  type="text"
+                  value={alasanBatal}
+                  onChange={e => setAlasanBatal(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="mis. salah pilih pelanggan"
+                />
+              </div>
+
+              {gagalBatal && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  {gagalBatal}
+                </p>
+              )}
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setAkanDibatalkan(null)}
+                  disabled={sedangBatal}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                >
+                  Tutup
+                </button>
+                <button
+                  onClick={jalankanBatal}
+                  disabled={sedangBatal}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-bold shadow-md shadow-red-200 transition-colors disabled:opacity-60"
+                >
+                  {sedangBatal ? 'Membatalkan...' : 'Batalkan Transaksi'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

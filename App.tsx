@@ -104,7 +104,10 @@ const App: React.FC = () => {
       ] = await Promise.all([
         fetchAllRecords<Cylinder>('cylinders'),
         fetchAllRecords<Member>('members'),
-        fetchAllRecords<Transaction>('transactions'),
+        // Transaksi yang dibatalkan disaring di sini, satu-satunya pintu masuk data.
+        // Stok, barang di tangan pelanggan, dan seluruh laporan diturunkan dari array
+        // ini, jadi menyaringnya sekali membuat semuanya ikut benar.
+        fetchAllRecords<Transaction>('transactions', '*', q => q.is('voidedAt', null)),
         fetchAllRecords<MemberPrice>('member_prices'),
         fetchAllRecords<GasPrice>('refill_prices'),
         fetchAllRecords<RefillStation>('refill_stations'),
@@ -652,6 +655,24 @@ const App: React.FC = () => {
     setTransactions(prev => [...prev, tx]);
   };
 
+  /**
+   * Membatalkan transaksi yang salah catat.
+   *
+   * Seluruh pembalikannya dikerjakan fungsi batalkan_transaksi() di database, bukan
+   * di sini: satu transaksi bisa menyentuh cylinders, members, dan rental_tariffs
+   * sekaligus, dan kalau dikerjakan berurutan dari browser, gagal di tengah
+   * meninggalkan data separuh terbalik.
+   */
+  const handleBatalkanTransaksi = async (id: string, alasan: string) => {
+    const { error } = await supabase.rpc('batalkan_transaksi', { p_id: id, p_alasan: alasan });
+    if (error) throw new Error(error.message);
+
+    // Muat ulang, bukan tebak-tebakan state: efeknya menyebar ke beberapa tabel
+    // sekaligus, dan salah menebak satu saja membuat angka di layar berbeda dari
+    // yang tersimpan.
+    await fetchData();
+  };
+
   const handleHapusPengeluaran = async (id: string) => {
     const { error } = await supabase.from('transactions').delete().eq('id', id);
     if (error) throw new Error(`Gagal menghapus pengeluaran: ${error.message}`);
@@ -923,6 +944,7 @@ const App: React.FC = () => {
               members={members}
               stations={refillStations}
               role={currentUser.role}
+              onBatalkanTransaksi={handleBatalkanTransaksi}
             />
           } />
 
