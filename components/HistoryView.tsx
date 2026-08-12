@@ -1,127 +1,53 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { Cylinder, Transaction, Member, RefillStation } from '../types';
 import { sebutanBarang } from '../lib/bulkStock';
 import { labelJenisTransaksi } from '../labels';
+import { usePaginasi } from '../lib/usePaginasi';
+import Paginasi from './Paginasi';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
 
 interface HistoryViewProps {
-    transactions: Transaction[]; // Kept for interface compatibility but we fetch our own data
+    transactions: Transaction[];
     cylinders: Cylinder[];
     members: Member[];
     stations: RefillStation[];
 }
 
-const HistoryView: React.FC<HistoryViewProps> = ({ cylinders, members, stations }) => {
+const BARIS_PER_HALAMAN = 15;
+
+const HistoryView: React.FC<HistoryViewProps> = ({ transactions, cylinders, members, stations }) => {
     const navigate = useNavigate();
-    const [historyData, setHistoryData] = useState<Transaction[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [page, setPage] = useState(1);
-    const [totalCount, setTotalCount] = useState(0);
-    const ITEMS_PER_PAGE = 15;
 
-    useEffect(() => {
-        fetchHistory(page);
-    }, [page]);
+    // Dulu layar ini menembak Supabase sendiri dengan count: 'exact' setiap pindah
+    // halaman -- dua permintaan untuk baris yang sudah ikut terunduh saat login dan
+    // sudah diterima lewat prop `transactions` yang selama ini diabaikan.
+    //
+    // Sekalian memperbaiki: transaksi yang baru dicatat kini langsung muncul, karena
+    // array ini yang di-update App setiap kali menyimpan.
+    const riwayat = useMemo(
+        () => [...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+        [transactions]);
 
-    const fetchHistory = async (pageNo: number) => {
-        setLoading(true);
-        const from = (pageNo - 1) * ITEMS_PER_PAGE;
-        const to = from + ITEMS_PER_PAGE - 1;
+    const halaman = usePaginasi(riwayat, BARIS_PER_HALAMAN);
 
-        try {
-            const { data, count, error } = await supabase
-                .from('transactions')
-                .select('*', { count: 'exact' })
-                .order('date', { ascending: false })
-                .range(from, to);
+    // Peta menggantikan .find() per baris -- dengan 1.829 tabung dan 1.290 pelanggan,
+    // pemindaian linear per baris jauh lebih mahal daripada barisnya sendiri.
+    const petaTabung = useMemo(() => new Map(cylinders.map(c => [c.id, c])), [cylinders]);
+    const petaPelanggan = useMemo(() => new Map(members.map(m => [m.id, m])), [members]);
+    const petaVendor = useMemo(() => new Map(stations.map(s => [s.id, s])), [stations]);
 
-            if (data) {
-                setHistoryData(data as Transaction[]);
-            }
-            if (count !== null) setTotalCount(count);
-            if (error) console.error("Error fetching history:", error);
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
-
-    const PaginationControls = () => (
-        <div className="flex items-center justify-between bg-white px-4 py-3 border-t border-b border-gray-100 sm:px-6">
-            <div className="flex flex-1 justify-between sm:hidden">
-                <button
-                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                    disabled={page === 1}
-                    className="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                >
-                    Previous
-                </button>
-                <button
-                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                    disabled={page === totalPages}
-                    className="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                >
-                    Next
-                </button>
-            </div>
-            <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
-                <div>
-                    <p className="text-sm text-gray-700">
-                        Menampilkan <span className="font-medium">{((page - 1) * ITEMS_PER_PAGE) + 1}</span> sampai <span className="font-medium">{Math.min(page * ITEMS_PER_PAGE, totalCount)}</span> dari <span className="font-medium">{totalCount}</span> hasil
-                    </p>
-                </div>
-                <div>
-                    <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Navigasi Halaman">
-                        <button
-                            onClick={() => setPage(p => Math.max(1, p - 1))}
-                            disabled={page === 1}
-                            className="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            <span className="sr-only">Sebelumnya</span>
-                            <span className="material-icons text-sm">chevron_left</span>
-                        </button>
-                        {/* Simple Pagination Numbers Logic */}
-                        {[...Array(totalPages)].map((_, i) => {
-                            const p = i + 1;
-                            // Show first, last, current, and adjacent pages logic could go here, keeping it simple for now as requested
-                            if (totalPages > 7 && (p !== 1 && p !== totalPages && Math.abs(page - p) > 1)) {
-                                if (Math.abs(page - p) === 2) return <span key={p} className="px-2 py-2 text-gray-400">...</span>;
-                                return null;
-                            }
-                            return (
-                                <button
-                                    key={p}
-                                    onClick={() => setPage(p)}
-                                    aria-current={page === p ? 'page' : undefined}
-                                    className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ${page === p
-                                            ? 'z-10 bg-indigo-600 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600'
-                                            : 'text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0'
-                                        }`}
-                                >
-                                    {p}
-                                </button>
-                            );
-                        })}
-                        <button
-                            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                            disabled={page === totalPages}
-                            className="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            <span className="sr-only">Berikutnya</span>
-                            <span className="material-icons text-sm">chevron_right</span>
-                        </button>
-                    </nav>
-                </div>
-            </div>
-        </div>
+    const kontrol = (
+        <Paginasi
+            halaman={halaman.halaman}
+            totalHalaman={halaman.totalHalaman}
+            totalBaris={halaman.totalBaris}
+            perHalaman={halaman.perHalaman}
+            onPindah={halaman.setHalaman}
+        />
     );
 
     return (
-        <div className="p-6 space-y-6 animate-fade-in-up">
+        <div className="p-4 sm:p-6 space-y-6 animate-fade-in-up">
             {/* Header dengan tombol kembali */}
             <div className="flex items-center gap-4">
                 <button
@@ -132,24 +58,19 @@ const HistoryView: React.FC<HistoryViewProps> = ({ cylinders, members, stations 
                 </button>
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800">Riwayat Transaksi</h1>
-                    <p className="text-sm text-gray-500">Semua riwayat aktivitas (Server-Side Pagination)</p>
+                    <p className="text-sm text-gray-500">Semua riwayat aktivitas</p>
                 </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                <PaginationControls />
+            {kontrol}
 
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="divide-y divide-gray-100">
-                    {loading ? (
-                        <div className="p-12 flex justify-center">
-                            <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-                        </div>
-                    ) : historyData.length > 0 ? (
-                        historyData.map(tx => {
-                            // Cari data terkait untuk setiap transaksi
-                            const cyl = cylinders.find(c => c.id === tx.cylinderId);
-                            const member = members.find(m => m.id === tx.memberId);
-                            const station = stations.find(s => s.id === tx.refillStationId);
+                    {halaman.halamanIni.length > 0 ? (
+                        halaman.halamanIni.map(tx => {
+                            const cyl = petaTabung.get(tx.cylinderId ?? '');
+                            const member = petaPelanggan.get(tx.memberId ?? '');
+                            const station = petaVendor.get(tx.refillStationId ?? '');
 
                             let description = '';
                             let icon = '';
@@ -238,9 +159,9 @@ const HistoryView: React.FC<HistoryViewProps> = ({ cylinders, members, stations 
                         </div>
                     )}
                 </div>
-
-                <PaginationControls />
             </div>
+
+            {kontrol}
         </div>
     );
 };

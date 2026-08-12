@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Cylinder, Transaction, Member, RefillStation, GasType, CylinderStatus, UserRole } from '../types';
-import { labelJenisTransaksi, labelStatusBayar } from '../labels';
+import { formatIDR, labelJenisTransaksi, labelStatusBayar } from '../labels';
 import { sebutanBarang } from '../lib/bulkStock';
 import { bolehLihatKeuanganPenuh } from '../lib/peran';
 import { hariIni, hitungLaporanHarian } from '../lib/laporanHarian';
+import { usePaginasi } from '../lib/usePaginasi';
+import Paginasi from './Paginasi';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { supabase } from '../lib/supabase';
 
 interface ReportsViewProps {
   cylinders: Cylinder[];
@@ -18,7 +19,7 @@ interface ReportsViewProps {
 const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
 
 // Sub-component for individual delivery card with toggle state
-const DeliveryManifestCard: React.FC<{ date: string, txs: Transaction[], cylinders: Cylinder[] }> = ({ date, txs, cylinders }) => {
+const DeliveryManifestCard: React.FC<{ date: string, txs: Transaction[], petaTabung: Map<string, Cylinder> }> = ({ date, txs, petaTabung }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -52,7 +53,7 @@ const DeliveryManifestCard: React.FC<{ date: string, txs: Transaction[], cylinde
             <div className="p-6 animate-fade-in border-t border-gray-100">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     {txs.map(t => {
-                        const cyl = cylinders.find(c => c.id === t.cylinderId);
+                        const cyl = petaTabung.get(t.cylinderId ?? '');
                         return (
                             <div key={t.id} className="flex items-center gap-3 p-3 rounded-lg border border-gray-100 bg-gray-50/50 hover:bg-white hover:border-cyan-100 transition-colors">
                                 <div className="w-10 h-10 rounded bg-white border border-gray-200 flex items-center justify-center font-bold text-xs text-gray-600 font-mono shadow-sm">
@@ -90,21 +91,31 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
     bolehRekapPenuh ? 'financials' : 'harian');
   const [tanggalHarian, setTanggalHarian] = useState(hariIni);
   const [logFilter, setLogFilter] = useState('');
-  
+
+  // Kata cari yang sudah mengendap. Menyaring ratusan transaksi terhadap 1.829 tabung
+  // dan 1.290 pelanggan terlalu mahal untuk dijalankan di setiap ketukan tombol.
+  const [cariMengendap, setCariMengendap] = useState('');
+  useEffect(() => {
+    const jeda = setTimeout(() => setCariMengendap(logFilter), 150);
+    return () => clearTimeout(jeda);
+  }, [logFilter]);
+
   // -- New State for Logs --
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table');
   const [selectedType, setSelectedType] = useState<string>('ALL');
 
-  // -- Delivery Pagination State --
-  const [deliveryPage, setDeliveryPage] = useState(1);
-  const [deliveryTransactions, setDeliveryTransactions] = useState<Transaction[]>([]);
-  const [totalDeliveryCount, setTotalDeliveryCount] = useState(0);
-  const [isDeliveryLoading, setIsDeliveryLoading] = useState(false);
-  const DELIVERY_ITEMS_PER_PAGE = 20;
+  const BARIS_PER_HALAMAN = 25;
+  const PENGIRIMAN_PER_HALAMAN = 20;
 
-  // -- Helpers --
-  const formatIDR = (val: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(val);
-  
+  // -- Peta pencarian --
+  //
+  // Sebelumnya tiap baris memanggil cylinders.find()/members.find()/stations.find().
+  // Dengan 1.829 tabung dan 1.290 pelanggan itu pemindaian linear per baris, diulang
+  // setiap render. Peta dibangun sekali per perubahan data, lalu lookup-nya konstan.
+  const petaTabung = useMemo(() => new Map(cylinders.map(c => [c.id, c])), [cylinders]);
+  const petaPelanggan = useMemo(() => new Map(members.map(m => [m.id, m])), [members]);
+  const petaVendor = useMemo(() => new Map(stations.map(s => [s.id, s])), [stations]);
+
   // -- Data Processing: Inventory --
   const totalCylinders = cylinders.length;
   const rentedCount = cylinders.filter(c => c.status === CylinderStatus.Rented).length;
@@ -194,72 +205,69 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
       () => hitungLaporanHarian(transactions, tanggalHarian),
       [transactions, tanggalHarian]);
 
+  // Satu hari biasanya pendek, tapi hari sibuk bisa panjang -- dan komponennya sudah ada.
+  const halamanHarian = usePaginasi(laporanHarian.transaksi, BARIS_PER_HALAMAN);
+
   // -- Data Processing: Logs --
+  //
+  // Teks pencarian dibangun sekali dan disimpan, terpisah dari kata carinya. Kalau
+  // penyusunannya ikut di dalam saringan, setiap ketikan membangun ulang string untuk
+  // seluruh transaksi -- padahal yang berubah cuma kata yang dicari.
+  const logsTerurut = useMemo(() => transactions
+      .map(t => ({
+          t,
+          teksCari: [
+              t.id,
+              t.type,
+              petaTabung.get(t.cylinderId ?? '')?.serialCode,
+              petaPelanggan.get(t.memberId ?? '')?.companyName,
+              petaVendor.get(t.refillStationId ?? '')?.name,
+              t.description,
+          ].filter(Boolean).join(' ').toLowerCase(),
+      }))
+      .sort((a, b) => new Date(b.t.date).getTime() - new Date(a.t.date).getTime()),
+    [transactions, petaTabung, petaPelanggan, petaVendor]);
+
   const filteredLogs = useMemo(() => {
-      return transactions.filter(t => {
-          const cyl = cylinders.find(c => c.id === t.cylinderId);
-          const member = members.find(m => m.id === t.memberId);
-          const station = stations.find(s => s.id === t.refillStationId);
-          
-          const searchStr = `${t.id} ${t.type} ${cyl?.serialCode} ${member?.companyName} ${station?.name}`.toLowerCase();
-          const matchesSearch = searchStr.includes(logFilter.toLowerCase());
-          const matchesType = selectedType === 'ALL' || t.type === selectedType;
-          
-          return matchesSearch && matchesType;
-      }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [transactions, cylinders, members, stations, logFilter, selectedType]);
+      const cari = cariMengendap.trim().toLowerCase();
+      return logsTerurut
+          .filter(({ t, teksCari }) =>
+              (selectedType === 'ALL' || t.type === selectedType) &&
+              (!cari || teksCari.includes(cari)))
+          .map(({ t }) => t);
+  }, [logsTerurut, cariMengendap, selectedType]);
 
-  // -- Fetch Delivery Data --
-  useEffect(() => {
-    if (activeTab === 'delivery') {
-      const fetchDelivery = async () => {
-        setIsDeliveryLoading(true);
-        try {
-            const from = (deliveryPage - 1) * DELIVERY_ITEMS_PER_PAGE;
-            const to = from + DELIVERY_ITEMS_PER_PAGE - 1;
-
-            const { data, count, error } = await supabase
-                .from('transactions')
-                .select('*', { count: 'exact' })
-                .eq('type', 'DELIVERY')
-                .order('date', { ascending: false })
-                .range(from, to);
-            
-            if (error) throw error;
-            if (data) setDeliveryTransactions(data);
-            if (count !== null) setTotalDeliveryCount(count);
-        } catch (e) {
-            console.error("Error fetching delivery reports:", e);
-        } finally {
-            setIsDeliveryLoading(false);
-        }
-      };
-      fetchDelivery();
-    }
-  }, [activeTab, deliveryPage]);
+  const halamanLogs = usePaginasi(filteredLogs, BARIS_PER_HALAMAN);
 
   // -- Data Processing: Delivery --
-  const deliveryGroups = useMemo(() => {
-    // Only process if we have delivery transactions
-    if (activeTab !== 'delivery') return [];
+  //
+  // Disaring dari transaksi yang sudah ada di memori. Dulu tab ini menembak Supabase
+  // sendiri dengan count: 'exact' setiap pindah halaman -- dua permintaan untuk baris
+  // yang sudah ikut terunduh saat login.
+  const pengirimanTerurut = useMemo(() => transactions
+      .filter(t => t.type === 'DELIVERY')
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    [transactions]);
 
+  const halamanPengiriman = usePaginasi(pengirimanTerurut, PENGIRIMAN_PER_HALAMAN);
+
+  const deliveryGroups = useMemo(() => {
     const groups: Record<string, Transaction[]> = {};
-    deliveryTransactions.forEach(t => {
-        const dateKey = t.date; 
-        if (!groups[dateKey]) groups[dateKey] = [];
-        groups[dateKey].push(t);
+    halamanPengiriman.halamanIni.forEach(t => {
+        if (!groups[t.date]) groups[t.date] = [];
+        groups[t.date].push(t);
     });
-    
+
     return Object.entries(groups)
-        .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime()); 
-  }, [deliveryTransactions, activeTab]);
+        .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime());
+  }, [halamanPengiriman.halamanIni]);
 
   // tampilkanNominal dilewatkan dari pemanggil: baris REFILL_IN menempelkan biaya ke
   // subtitle, jadi menyembunyikan kolom Jumlah saja tidak cukup menutup nominalnya.
   const getTxDescription = (t: Transaction, tampilkanNominal = true) => {
-      const cyl = cylinders.find(c => c.id === t.cylinderId);
-      const member = members.find(m => m.id === t.memberId);
-      const station = stations.find(s => s.id === t.refillStationId);
+      const cyl = petaTabung.get(t.cylinderId ?? '');
+      const member = petaPelanggan.get(t.memberId ?? '');
+      const station = petaVendor.get(t.refillStationId ?? '');
       const code = cyl?.serialCode || 'Tidak diketahui';
 
       switch(t.type) {
@@ -291,27 +299,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
       }
   };
 
-  const totalDeliveryPages = Math.ceil(totalDeliveryCount / DELIVERY_ITEMS_PER_PAGE);
-
-  const PaginationControls = () => (
-      <div className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-          <button 
-              onClick={() => setDeliveryPage(p => Math.max(1, p - 1))}
-              disabled={deliveryPage === 1 || isDeliveryLoading}
-              className="px-3 py-1 text-sm text-gray-600 hover:bg-gray-100 rounded disabled:opacity-50 transition-colors flex items-center gap-1"
-          >
-              <span className="material-icons text-sm">chevron_left</span> Previous
-          </button>
-          <span className="text-xs font-medium text-gray-500">
-              {isDeliveryLoading ? 'Memuat...' : `Halaman ${deliveryPage} dari ${totalDeliveryPages || 1}`}
-          </span>
-          <button 
-              onClick={() => setDeliveryPage(p => Math.min(totalDeliveryPages, p + 1))}
-              disabled={deliveryPage === totalDeliveryPages || isDeliveryLoading || totalDeliveryPages === 0}
-              className="px-3 py-1 text-sm text-gray-600 hover:bg-gray-100 rounded disabled:opacity-50 transition-colors flex items-center gap-1"
-          >
-              Next <span className="material-icons text-sm">chevron_right</span>
-          </button>
+  /** Baris ringkas untuk kartu di HP -- dipakai tabel Riwayat dan Laporan Harian. */
+  const BarisKartu: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+      <div className="flex justify-between gap-3 text-sm">
+          <span className="text-gray-500 shrink-0">{label}</span>
+          <span className="text-gray-800 text-right min-w-0 break-words">{children}</span>
       </div>
   );
 
@@ -423,19 +415,18 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
       {/* TAB: DELIVERY */}
       {activeTab === 'delivery' && (
         <div className="space-y-4 animate-fade-in">
-            {/* Top Pagination */}
-            <PaginationControls />
+            <Paginasi
+                halaman={halamanPengiriman.halaman}
+                totalHalaman={halamanPengiriman.totalHalaman}
+                totalBaris={halamanPengiriman.totalBaris}
+                perHalaman={halamanPengiriman.perHalaman}
+                onPindah={halamanPengiriman.setHalaman}
+            />
 
-            {/* List */}
-            {isDeliveryLoading ? (
-                <div className="p-12 text-center text-gray-400 bg-white rounded-xl border border-gray-200">
-                    <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-2"></div>
-                    <p>Memuat laporan pengiriman...</p>
-                </div>
-            ) : deliveryGroups.length > 0 ? (
+            {deliveryGroups.length > 0 ? (
                 <div className="space-y-4">
                     {deliveryGroups.map(([date, txs]) => (
-                        <DeliveryManifestCard key={date} date={date} txs={txs} cylinders={cylinders} />
+                        <DeliveryManifestCard key={date} date={date} txs={txs} petaTabung={petaTabung} />
                     ))}
                 </div>
             ) : (
@@ -445,8 +436,15 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                 </div>
             )}
 
-            {/* Bottom Pagination */}
-            {deliveryGroups.length > 0 && <PaginationControls />}
+            {deliveryGroups.length > 0 && (
+                <Paginasi
+                    halaman={halamanPengiriman.halaman}
+                    totalHalaman={halamanPengiriman.totalHalaman}
+                    totalBaris={halamanPengiriman.totalBaris}
+                    perHalaman={halamanPengiriman.perHalaman}
+                    onPindah={halamanPengiriman.setHalaman}
+                />
+            )}
         </div>
       )}
 
@@ -488,8 +486,10 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
               </div>
 
               {laporanHarian.transaksi.length > 0 ? (
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                      <div className="overflow-x-auto">
+                  <div className="space-y-4">
+                      {/* Desktop: tabel. HP: kartu -- kolom Jumlah dulu tersembunyi di
+                          balik geser samping, padahal itu kolom yang paling dicari. */}
+                      <div className="hidden md:block bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                           <table className="w-full text-left text-sm">
                               <thead className="bg-gray-50 border-b border-gray-200">
                                   <tr>
@@ -501,10 +501,10 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                   </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100">
-                                  {laporanHarian.transaksi.map(t => {
-                                      const cyl = cylinders.find(c => c.id === t.cylinderId);
-                                      const member = members.find(m => m.id === t.memberId);
-                                      const station = stations.find(s => s.id === t.refillStationId);
+                                  {halamanHarian.halamanIni.map(t => {
+                                      const cyl = petaTabung.get(t.cylinderId ?? '');
+                                      const member = petaPelanggan.get(t.memberId ?? '');
+                                      const station = petaVendor.get(t.refillStationId ?? '');
                                       return (
                                           <tr key={t.id} className="hover:bg-gray-50">
                                               <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
@@ -528,6 +528,39 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                               </tbody>
                           </table>
                       </div>
+
+                      <div className="md:hidden space-y-3">
+                          {halamanHarian.halamanIni.map(t => {
+                              const cyl = petaTabung.get(t.cylinderId ?? '');
+                              const member = petaPelanggan.get(t.memberId ?? '');
+                              const station = petaVendor.get(t.refillStationId ?? '');
+                              return (
+                                  <div key={t.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-2">
+                                      <div className="flex justify-between items-center gap-2">
+                                          <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${getTypeBadgeClass(t.type)}`}>
+                                              {labelJenisTransaksi(t.type)}
+                                          </span>
+                                          <span className="text-xs text-gray-500">
+                                              {new Date(t.date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                                          </span>
+                                      </div>
+                                      <BarisKartu label="Item">{sebutanBarang(t, cyl?.serialCode)}</BarisKartu>
+                                      <BarisKartu label="Pihak">{member ? member.companyName : (station ? station.name : '-')}</BarisKartu>
+                                      <BarisKartu label="Jumlah">
+                                          <span className="font-bold">{t.cost ? formatIDR(t.cost) : '-'}</span>
+                                      </BarisKartu>
+                                  </div>
+                              );
+                          })}
+                      </div>
+
+                      <Paginasi
+                          halaman={halamanHarian.halaman}
+                          totalHalaman={halamanHarian.totalHalaman}
+                          totalBaris={halamanHarian.totalBaris}
+                          perHalaman={halamanHarian.perHalaman}
+                          onPindah={halamanHarian.setHalaman}
+                      />
                   </div>
               ) : (
                   <div className="p-12 text-center text-gray-400 bg-white rounded-xl border border-gray-200 border-dashed">
@@ -701,15 +734,16 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                       <option value="EXPENSE">Biaya Operasional</option>
                   </select>
 
-                  <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
-                    <button 
+                  {/* Disembunyikan di HP: di sana selalu kartu, jadi pilihannya tidak berarti. */}
+                  <div className="hidden md:flex bg-gray-100 p-1 rounded-lg border border-gray-200">
+                    <button
                         onClick={() => setViewMode('table')}
                         className={`p-1.5 rounded-md flex items-center justify-center transition-all ${viewMode === 'table' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}
                         title="Tampilan Tabel"
                     >
                         <span className="material-icons text-xl">table_chart</span>
                     </button>
-                    <button 
+                    <button
                         onClick={() => setViewMode('card')}
                         className={`p-1.5 rounded-md flex items-center justify-center transition-all ${viewMode === 'card' ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}
                         title="Tampilan Kartu"
@@ -721,9 +755,19 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
 
               <div className="space-y-3">
                   {filteredLogs.length > 0 ? (
-                      viewMode === 'table' ? (
-                          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                              <div className="overflow-x-auto">
+                    <>
+                      <Paginasi
+                          halaman={halamanLogs.halaman}
+                          totalHalaman={halamanLogs.totalHalaman}
+                          totalBaris={halamanLogs.totalBaris}
+                          perHalaman={halamanLogs.perHalaman}
+                          onPindah={halamanLogs.setHalaman}
+                      />
+
+                      {/* Tabel hanya di desktop. Di HP tabel ini harus digeser ke samping
+                          untuk melihat kolom Jumlah, jadi di sana selalu kartu. */}
+                      {viewMode === 'table' && (
+                          <div className="hidden md:block bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                                 <table className="w-full text-left text-sm">
                                     <thead className="bg-gray-50 border-b border-gray-200">
                                         <tr>
@@ -736,10 +780,10 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
-                                        {filteredLogs.map(t => {
-                                            const cyl = cylinders.find(c => c.id === t.cylinderId);
-                                            const member = members.find(m => m.id === t.memberId);
-                                            const station = stations.find(s => s.id === t.refillStationId);
+                                        {halamanLogs.halamanIni.map(t => {
+                                            const cyl = petaTabung.get(t.cylinderId ?? '');
+                                            const member = petaPelanggan.get(t.memberId ?? '');
+                                            const station = petaVendor.get(t.refillStationId ?? '');
                                             return (
                                                 <tr key={t.id} className="hover:bg-gray-50">
                                                     <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
@@ -791,10 +835,12 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                         })}
                                     </tbody>
                                 </table>
-                              </div>
                           </div>
-                      ) : (
-                        filteredLogs.map(t => {
+                      )}
+
+                      {/* Kartu: selalu tampil di HP, dan di desktop kalau modenya kartu. */}
+                      <div className={`space-y-3 ${viewMode === 'table' ? 'md:hidden' : ''}`}>
+                        {halamanLogs.halamanIni.map(t => {
                           const info = getTxDescription(t, bolehRekapPenuh);
                           return (
                             <div key={t.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex gap-4 items-start">
@@ -804,12 +850,15 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="flex justify-between items-start">
-                                        <h4 className="text-sm font-bold text-gray-800 truncate">{info.title}</h4>
+                                        {/* Membungkus di HP, memotong di desktop. Kartu kini tampilan
+                                            utama di layar sempit, dan "Menyewakan ..." yang terpotong
+                                            tidak memberi tahu apa pun. */}
+                                        <h4 className="text-sm font-bold text-gray-800 break-words md:truncate">{info.title}</h4>
                                         <span className="text-xs text-gray-400 whitespace-nowrap ml-2">
                                             {new Date(t.date).toLocaleDateString('id-ID')}
                                         </span>
                                     </div>
-                                    <p className="text-xs text-gray-600 mt-0.5 truncate">{info.subtitle}</p>
+                                    <p className="text-xs text-gray-600 mt-0.5 break-words md:truncate">{info.subtitle}</p>
                                     <div className="flex items-center gap-2 mt-2">
                                         <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-mono">
                                             ID: {t.id.split('-').pop()}
@@ -833,8 +882,17 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                 )}
                             </div>
                           );
-                        })
-                      )
+                        })}
+                      </div>
+
+                      <Paginasi
+                          halaman={halamanLogs.halaman}
+                          totalHalaman={halamanLogs.totalHalaman}
+                          totalBaris={halamanLogs.totalBaris}
+                          perHalaman={halamanLogs.perHalaman}
+                          onPindah={halamanLogs.setHalaman}
+                      />
+                    </>
                   ) : (
                       <div className="p-12 text-center text-gray-400 bg-white rounded-xl border border-gray-200 border-dashed">
                           <span className="material-icons text-3xl mb-2">search_off</span>
