@@ -55,8 +55,19 @@ export enum MemberStatus {
 
 export interface AppUser {
   id: string;
-  username: string;
-  password?: string; // Optional for UI display, required for auth logic
+
+  /**
+   * Email, sekaligus identitas login -- Login.tsx meneruskannya ke
+   * signInWithPassword({ email }). Dulu bernama `username` dan diisi teks bebas
+   * dari form Tambah Pengguna, sehingga akun yang dibuat tidak pernah bisa login.
+   *
+   * Di basis data kolomnya masih bernama profiles.username (diisi trigger
+   * handle_new_user dari auth.users.email); pemetaannya di App.tsx.
+   */
+  email: string;
+
+  /** Hanya untuk mengirim kata sandi awal ke Edge Function; tidak pernah dibaca balik. */
+  password?: string;
   name: string;
   role: UserRole;
   lastLogin?: string;

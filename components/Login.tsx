@@ -1,7 +1,7 @@
 ﻿import React, { useState } from 'react';
 
 interface LoginProps {
-  onLogin: (username: string, pass: string) => Promise<boolean> | boolean;
+  onLogin: (email: string, pass: string) => Promise<boolean> | boolean;
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {

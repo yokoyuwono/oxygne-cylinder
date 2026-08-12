@@ -21,6 +21,29 @@ import { bolehKelolaPengguna } from './lib/peran';
 import PengeluaranView, { PengeluaranPayload } from './components/PengeluaranView';
 import { supabase, isSupabaseConfigured, fetchAllRecords } from './lib/supabase';
 
+/**
+ * Baris tabel profiles apa adanya.
+ *
+ * Kolomnya bernama `username` tapi isinya email -- trigger handle_new_user
+ * mengisinya dari auth.users.email. Nama kolomnya dibiarkan supaya tidak perlu
+ * migration; yang dipetakan cuma bentuknya saat masuk ke app.
+ */
+interface BarisProfil {
+  id: string;
+  username: string | null;
+  name: string | null;
+  role: string | null;
+  lastLogin?: string | null;
+}
+
+const keAppUser = (baris: BarisProfil): AppUser => ({
+  id: baris.id,
+  email: baris.username || '',
+  name: baris.name || 'Tanpa Nama',
+  role: (baris.role as UserRole) || UserRole.Operator,
+  lastLogin: baris.lastLogin || undefined,
+});
+
 const App: React.FC = () => {
   // -- Configuration Guard --
   if (!isSupabaseConfigured) {
@@ -86,7 +109,7 @@ const App: React.FC = () => {
         fetchAllRecords<GasPrice>('refill_prices'),
         fetchAllRecords<RefillStation>('refill_stations'),
         fetchAllRecords<RefillPrice>('refill_prices'),
-        fetchAllRecords<AppUser>('profiles'),
+        fetchAllRecords<BarisProfil>('profiles'),
         fetchAllRecords<RentalTariff>('rental_tariffs')
       ]);
 
@@ -97,7 +120,7 @@ const App: React.FC = () => {
       if (gpData) setGasPrices(gpData);
       if (rsData) setRefillStations(rsData);
       if (rpData) setRefillPrices(rpData);
-      if (prData) setUsers(prData);
+      if (prData) setUsers(prData.map(keAppUser));
       if (rtData) setTariffs(rtData);
 
     } catch (error) {
@@ -115,7 +138,7 @@ const App: React.FC = () => {
         if (profile) {
           setCurrentUser({
             id: profile.id,
-            username: profile.username || session.user.email || '',
+            email: profile.username || session.user.email || '',
             name: profile.name || 'User',
             role: profile.role as UserRole || UserRole.Operator,
             lastLogin: new Date().toISOString()
@@ -129,10 +152,10 @@ const App: React.FC = () => {
   }, []);
 
   // -- Auth Handlers --
-  const handleLogin = async (username: string, pass: string) => {
+  const handleLogin = async (email: string, pass: string) => {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: username,
+        email,
         password: pass
       });
 
@@ -146,7 +169,7 @@ const App: React.FC = () => {
       if (profile) {
         const userObj: AppUser = {
           id: profile.id,
-          username: profile.username || username,
+          email: profile.username || email,
           name: profile.name || 'User',
           role: profile.role as UserRole,
           lastLogin: new Date().toISOString()
@@ -172,18 +195,53 @@ const App: React.FC = () => {
   };
 
   // -- User CRUD Handlers (Admin Only) --
-  const handleAddUser = async (user: AppUser) => {
-    // In real app: Call Cloud Function to create Supabase Auth User
-    alert("Gunakan Dashboard Supabase untuk membuat akun pengguna baru.");
-  };
-  const handleUpdateUser = async (user: AppUser) => {
-    const { error } = await supabase.from('profiles').update({ role: user.role, name: user.name }).eq('id', user.id);
-    if (!error) {
-      setUsers(prev => prev.map(u => u.id === user.id ? user : u));
+
+  /**
+   * Membuat dan menghapus akun menyentuh auth.users, yang cuma bisa disentuh
+   * service_role key -- dan key itu tidak boleh ada di browser. Keduanya dititipkan
+   * ke Edge Function kelola-pengguna, yang memeriksa ulang bahwa pemanggilnya Admin.
+   */
+  const panggilKelolaPengguna = async (body: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke('kelola-pengguna', { body });
+
+    // Status non-2xx datang sebagai FunctionsHttpError dengan pesan generik
+    // ("non-2xx status code"); alasan sebenarnya ada di body responsnya.
+    if (error) {
+      const detail = await (error as any).context?.json?.().catch(() => null);
+      throw new Error(detail?.error || error.message);
     }
+    if (data?.error) throw new Error(data.error);
+
+    return data;
   };
-  const handleDeleteUser = (id: string) => {
-    // Admin deletion logic
+
+  const handleAddUser = async (user: AppUser) => {
+    const hasil = await panggilKelolaPengguna({
+      aksi: 'tambah',
+      email: user.email,
+      nama: user.name,
+      password: user.password,
+      peran: user.role,
+    });
+
+    setUsers(prev => [...prev, { ...user, id: hasil.id, password: undefined }]);
+  };
+
+  const handleUpdateUser = async (user: AppUser) => {
+    // Nama dan peran ada di profiles, jadi cukup lewat RLS biasa. Email dan kata
+    // sandi ada di auth.users dan tidak diubah dari sini.
+    const { error } = await supabase
+      .from('profiles')
+      .update({ role: user.role, name: user.name })
+      .eq('id', user.id);
+
+    if (error) throw new Error(`Gagal menyimpan perubahan: ${error.message}`);
+
+    setUsers(prev => prev.map(u => u.id === user.id ? { ...u, name: user.name, role: user.role } : u));
+  };
+
+  const handleDeleteUser = async (id: string) => {
+    await panggilKelolaPengguna({ aksi: 'hapus', id });
     setUsers(prev => prev.filter(u => u.id !== id));
   };
 

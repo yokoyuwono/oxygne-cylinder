@@ -25,5 +25,9 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "//": "Edge Function berjalan di Deno, bukan di browser -- globals dan import jsr: miliknya tidak dikenal tsconfig ini.",
+  "exclude": [
+    "supabase/functions"
+  ]
 }

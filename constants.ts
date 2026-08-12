@@ -3,9 +3,8 @@
 import { Cylinder, CylinderSize, CylinderStatus, GasType, Member, MemberPrice, Transaction, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus } from './types';
 
 export const MOCK_USERS: AppUser[] = [
-  { id: 'u1', username: 'admin', password: 'password123', name: 'Super Admin', role: UserRole.Admin, lastLogin: '2023-10-27T08:30:00Z' },
-  { id: 'u2', username: 'operator', password: 'password123', name: 'Warehouse Staff', role: UserRole.Operator, lastLogin: '2023-10-26T17:00:00Z' },
-  { id: 'u3', username: 'viewer', password: 'password123', name: 'Auditor', role: UserRole.Viewer, lastLogin: '2023-10-25T09:15:00Z' },
+  { id: 'u1', email: 'admin@contoh.com', name: 'Super Admin', role: UserRole.Admin, lastLogin: '2023-10-27T08:30:00Z' },
+  { id: 'u2', email: 'operator@contoh.com', name: 'Warehouse Staff', role: UserRole.Operator, lastLogin: '2023-10-26T17:00:00Z' },
 ];
 
 export const MOCK_MEMBERS: Member[] = [
