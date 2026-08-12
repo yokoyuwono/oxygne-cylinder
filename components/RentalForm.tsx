@@ -140,20 +140,17 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
     const selectedMember = selectedMemberObj || members.find(m => m.id === selectedMemberId);
 
     /**
-     * currentHolder dipakai dua cara di data ini: alur sewa lama menulis id
-     * pelanggan, sementara 1.630 baris warisan dan alur Sewa Baru menulis namanya.
-     * Cocokkan keduanya, kalau tidak tabung milik pelanggan lama tidak akan pernah
-     * muncul sebagai barang yang bisa dikembalikan.
+     * currentHolder sekarang selalu berisi id pelanggan.
+     *
+     * Dulu tidak: alur Sewa Baru menulis nama, meninggalkan 619 baris yang tidak
+     * pernah cocok, jadi di sini namanya ikut dicocokkan sebagai tambalan. Sumbernya
+     * sudah diperbaiki dan barisnya sudah dikonversi (migration rapikan_currentholder),
+     * sehingga pencocokan lewat nama tidak lagi berguna -- yang tersisa cuma segelintir
+     * baris atas nama pelanggan yang belum terdaftar, dan mereka tidak mungkin terpilih
+     * di sini justru karena belum terdaftar.
      */
-    const milikPelanggan = (holder?: string) =>
-        Boolean(holder) && (
-            holder === selectedMemberId ||
-            holder === selectedMember?.name ||
-            holder === selectedMember?.companyName
-        );
-
     const memberHeldCylinders = selectedMemberId
-        ? cylinders.filter(c => milikPelanggan(c.currentHolder))
+        ? cylinders.filter(c => c.currentHolder === selectedMemberId)
         : [];
 
     // Tarif regulator aktif -- sama seperti NewRentalForm, cuma satu yang dipakai.

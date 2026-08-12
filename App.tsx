@@ -549,12 +549,21 @@ const App: React.FC = () => {
     }
 
     // -- 3. Tabung berkode berpindah ke pelanggan --
+    //
+    // currentHolder diisi ID pelanggan, bukan namanya. Perhitungan barang di tangan
+    // pelanggan mencocokkan dengan ID (hitungSemuaHolding di lib/memberExit.ts),
+    // jadi selama ini tabung yang disewakan lewat layar ini tidak pernah terhitung
+    // sebagai barang yang dipegang pelanggan -- dan tidak pernah muncul saat
+    // pelanggannya hendak keluar.
     const cylinderIds = items.map(i => i.cylinderId).filter(Boolean) as string[];
     if (cylinderIds.length) {
       const { error: errCyl } = await supabase.from('cylinders').update({
         status: CylinderStatus.Rented,
-        currentHolder: member.name,
-        lastLocation: member.name,
+        currentHolder: memberId,
+        // Payload Sewa Baru tidak membawa companyName; untuk pelanggan lama diambil
+        // dari data yang sudah ada, untuk yang baru companyName memang disalin
+        // dari namanya (lihat pembuatan `baru` di atas).
+        lastLocation: members.find(m => m.id === memberId)?.companyName || member.name,
       }).in('id', cylinderIds);
       if (errCyl) throw new Error(`Gagal memperbarui status tabung: ${errCyl.message}`);
     }
