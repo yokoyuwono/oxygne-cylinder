@@ -3,7 +3,7 @@ import { Cylinder, Transaction, Member, RefillStation, GasType, CylinderStatus, 
 import { formatIDR, labelJenisTransaksi, labelStatusBayar } from '../labels';
 import { sebutanBarang } from '../lib/bulkStock';
 import { bolehBatalkanTransaksi, bolehLihatKeuanganPenuh } from '../lib/peran';
-import { hariIni, hitungLaporanHarian, tanggalLokal } from '../lib/laporanHarian';
+import { barisPendapatan, barisPengeluaran, hariIni, hitungLaporanHarian, tanggalLokal } from '../lib/laporanHarian';
 import { usePaginasi } from '../lib/usePaginasi';
 import Paginasi from './Paginasi';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
@@ -171,15 +171,12 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
   ].filter(d => d.value > 0);
 
   // -- Data Processing: Financials --
-  // Tukar isi juga pendapatan -- kalau hanya RENTAL_OUT yang dihitung, penjualan
-  // gas ke pembeli lepas hilang dari laporan.
-  const incomeTransactions = transactions.filter(
-    t => (t.type === 'RENTAL_OUT' || t.type === 'GAS_EXCHANGE') && (t.cost || 0) > 0
-  );
-  // Biaya isi ulang ke vendor dan belanja operasional harian sama-sama uang keluar.
-  const expenseTransactions = transactions.filter(
-    t => (t.type === 'REFILL_IN' || t.type === 'EXPENSE') && (t.cost || 0) > 0
-  );
+  //
+  // Predikatnya dipinjam dari lib/laporanHarian supaya rekap di halaman ini dan
+  // Laporan Harian tidak pernah berselisih: satu jenis baru yang lupa ditambahkan di
+  // salah satunya langsung jadi dua angka berbeda tanpa ada yang tahu mana yang benar.
+  const incomeTransactions = transactions.filter(barisPendapatan);
+  const expenseTransactions = transactions.filter(barisPengeluaran);
 
   const totalIncome = incomeTransactions.reduce((sum, t) => sum + (t.cost || 0), 0);
   const totalExpenses = expenseTransactions.reduce((sum, t) => sum + (t.cost || 0), 0);
@@ -198,11 +195,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
             monthlyData[key] = { name, Income: 0, Expense: 0, timestamp: date.getTime() };
         }
         
-        // Tukar isi ikut pendapatan, sama seperti saringan di atas -- kalau hanya
-        // RENTAL_OUT yang dijumlah, grafik ini lebih kecil dari KPI Total Pemasukan.
-        if (t.type === 'RENTAL_OUT' || t.type === 'GAS_EXCHANGE') {
+        // Saringan yang sama seperti di atas -- kalau dua tempat ini memakai daftar
+        // jenis yang berbeda, grafiknya tidak berjumlah sama dengan KPI di sebelahnya.
+        if (barisPendapatan(t)) {
             monthlyData[key].Income += (t.cost || 0);
-        } else if (t.type === 'REFILL_IN' || t.type === 'EXPENSE') {
+        } else if (barisPengeluaran(t)) {
             monthlyData[key].Expense += (t.cost || 0);
         }
     });
@@ -316,6 +313,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           case 'DELIVERY': return { title: `Pengiriman ${code}`, subtitle: 'Dalam Perjalanan', icon: 'local_shipping', color: 'bg-cyan-100 text-cyan-600', badge: 'ANTAR' };
           case 'GAS_EXCHANGE': return { title: `Tukar Isi ${sebutanBarang(t)}`, subtitle: member ? `Untuk ${member.companyName}` : 'Pembeli lepas', icon: 'swap_horiz', color: 'bg-teal-100 text-teal-600', badge: 'TUKAR' };
           case 'EXPENSE': return { title: t.description || 'Biaya Operasional', subtitle: 'Belanja operasional', icon: 'receipt_long', color: 'bg-rose-100 text-rose-600', badge: 'BIAYA' };
+          case 'INCOME': return { title: t.description || 'Penjualan Lain', subtitle: 'Penjualan lepas', icon: 'trending_up', color: 'bg-green-100 text-green-600', badge: 'JUAL' };
           default: return { title: 'Tidak diketahui', subtitle: '', icon: 'help', color: 'bg-gray-100', badge: 'LAIN' };
       }
   };
@@ -331,6 +329,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           case 'DELIVERY': return 'bg-cyan-100 text-cyan-800';
           case 'GAS_EXCHANGE': return 'bg-teal-100 text-teal-800';
           case 'EXPENSE': return 'bg-rose-100 text-rose-800';
+          case 'INCOME': return 'bg-green-100 text-green-800';
           default: return 'bg-gray-100 text-gray-800';
       }
   };
@@ -700,7 +699,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                   <div className="divide-y divide-gray-100">
                       {recentFinancialActivity.length > 0 ? (
                           recentFinancialActivity.map(t => {
-                              const isIncome = t.type === 'RENTAL_OUT' || t.type === 'GAS_EXCHANGE';
+                              const isIncome = barisPendapatan(t);
                               const cyl = cylinders.find(c => c.id === t.cylinderId);
                               const member = members.find(m => m.id === t.memberId);
                               return (
@@ -713,11 +712,13 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                               <p className="text-sm font-bold text-gray-800">
                                                   {t.type === 'GAS_EXCHANGE'
                                                       ? `Tukar Isi - ${member?.companyName || 'pembeli lepas'}`
-                                                      : t.type === 'EXPENSE'
-                                                          ? `Biaya Operasional - ${t.description || 'tanpa keterangan'}`
-                                                          : isIncome
-                                                              ? `Pendapatan Sewa - ${member?.companyName || 'Tidak diketahui'}`
-                                                              : `Biaya Isi Ulang - ${cyl?.gasType}`}
+                                                      : t.type === 'INCOME'
+                                                          ? `Penjualan Lain - ${t.description || 'tanpa keterangan'}`
+                                                          : t.type === 'EXPENSE'
+                                                              ? `Biaya Operasional - ${t.description || 'tanpa keterangan'}`
+                                                              : isIncome
+                                                                  ? `Pendapatan Sewa - ${member?.companyName || 'Tidak diketahui'}`
+                                                                  : `Biaya Isi Ulang - ${cyl?.gasType}`}
                                               </p>
                                               <p className="text-xs text-gray-500">
                                                   {new Date(t.date).toLocaleDateString('id-ID')} • {sebutanBarang(t, cyl?.serialCode)}
@@ -767,6 +768,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                       <option value="DEPOSIT_REFUND">Pengembalian Deposit</option>
                       <option value="DELIVERY">Pengiriman</option>
                       <option value="GAS_EXCHANGE">Tukar Isi</option>
+                      <option value="INCOME">Penjualan Lain</option>
                       <option value="EXPENSE">Biaya Operasional</option>
                   </select>
 
@@ -839,7 +841,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                                                 <div className="text-xs text-gray-500">{cyl.gasType} • {cyl.size}</div>
                                                             </div>
                                                         ) : t.description ? (
-                                                            // Baris pengeluaran tidak menyangkut tabung -- keterangannya yang
+                                                            // Baris kas tidak menyangkut tabung -- keterangannya yang
                                                             // menjelaskan barisnya, tanpa ini kolomnya cuma "N/A".
                                                             <span className="text-gray-700">{t.description}</span>
                                                         ) : (

@@ -11,15 +11,83 @@ interface LayoutProps {
   onLogout?: () => void;
 }
 
+interface ItemMenu {
+  to: string;
+  ikon: string;
+  label: string;
+  hanyaAdmin?: boolean;
+}
+
+interface GrupMenu {
+  judul: string;
+  ikon: string;
+  item: ItemMenu[];
+}
+
+/**
+ * Menu samping dikelompokkan, bukan satu daftar panjang.
+ *
+ * Sebelas tautan sejajar menuntut dibaca seluruhnya setiap kali, padahal sehari-hari
+ * yang dipakai cuma dua atau tiga. Dikelompokkan begini yang terlihat saat diam hanya
+ * empat baris, dan grup yang sedang dibuka terbuka sendiri -- jadi tidak ada langkah
+ * tambahan untuk sampai ke halaman yang sedang dikerjakan.
+ *
+ * Beranda sengaja di luar grup: itu tujuan paling sering, dan menyembunyikannya di
+ * balik satu klik justru menambah kerja.
+ */
+const MENU: GrupMenu[] = [
+  {
+    judul: 'Transaksi',
+    ikon: 'point_of_sale',
+    item: [
+      { to: '/rental', ikon: 'shopping_cart_checkout', label: 'Tukar Besar & Sewa' },
+      { to: '/tukar-isi', ikon: 'swap_horiz', label: 'Tukar Kecil' },
+      { to: '/kas', ikon: 'account_balance_wallet', label: 'Uang Masuk & Keluar' },
+    ],
+  },
+  {
+    judul: 'Operasional',
+    ikon: 'inventory_2',
+    item: [
+      { to: '/delivery', ikon: 'local_shipping', label: 'Pengiriman' },
+      { to: '/refill', ikon: 'local_gas_station', label: 'Manajemen Isi Ulang' },
+      { to: '/inventory', ikon: 'inventory_2', label: 'Stok Tabung' },
+    ],
+  },
+  {
+    judul: 'Administrasi',
+    ikon: 'settings',
+    item: [
+      { to: '/members', ikon: 'people', label: 'Data Pelanggan' },
+      { to: '/reports', ikon: 'assessment', label: 'Laporan & Riwayat' },
+      { to: '/master-data', ikon: 'tune', label: 'Master Data' },
+      { to: '/admin', ikon: 'admin_panel_settings', label: 'Pengguna', hanyaAdmin: true },
+    ],
+  },
+];
+
+/** Grup yang memuat halaman yang sedang dibuka -- dipakai untuk membukanya sendiri. */
+const grupAktif = (path: string) =>
+  MENU.find(g => g.item.some(i => path === i.to || path.startsWith(`${i.to}/`)))?.judul ?? null;
+
 const Layout: React.FC<LayoutProps> = ({ children, currentUser, onLogout }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const [grupTerbuka, setGrupTerbuka] = useState<string | null>(() => grupAktif(location.pathname));
 
   // Close mobile menu when route changes
   useEffect(() => {
     setIsMobileMenuOpen(false);
   }, [location]);
+
+  // Berpindah halaman lewat jalan lain -- Aksi Cepat di Beranda, tombol "Lihat Semua",
+  // penanda buku -- ikut membuka grupnya, supaya menu tidak menunjukkan posisi yang
+  // berbeda dari isi layar.
+  useEffect(() => {
+    const aktif = grupAktif(location.pathname);
+    if (aktif) setGrupTerbuka(aktif);
+  }, [location.pathname]);
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-3 px-4 py-3 rounded-lg transition-colors font-medium ${isActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`;
@@ -84,57 +152,47 @@ const Layout: React.FC<LayoutProps> = ({ children, currentUser, onLogout }) => {
         </div>
 
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto custom-scrollbar">
-          <p className="px-4 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 mt-2">Menu Utama</p>
-          <NavLink to="/" className={navLinkClass}>
+          <NavLink to="/" end className={navLinkClass}>
             <span className="material-icons">dashboard</span>
             Beranda
           </NavLink>
-          <NavLink to="/rental" className={navLinkClass}>
-            <span className="material-icons">shopping_cart_checkout</span>
-            Tukar Besar &amp; Sewa
-          </NavLink>
-          <NavLink to="/tukar-isi" className={navLinkClass}>
-            <span className="material-icons">swap_horiz</span>
-            Tukar kecil
-          </NavLink>
-          <NavLink to="/delivery" className={navLinkClass}>
-            <span className="material-icons">local_shipping</span>
-            Pengiriman
-          </NavLink>
-          <NavLink to="/refill" className={navLinkClass}>
-            <span className="material-icons">local_gas_station</span>
-            Manajemen Isi Ulang
-          </NavLink>
-          <NavLink to="/inventory" className={navLinkClass}>
-            <span className="material-icons">inventory_2</span>
-            Stok Tabung
-          </NavLink>
-          <NavLink to="/pengeluaran" className={navLinkClass}>
-            <span className="material-icons">receipt_long</span>
-            Pengeluaran
-          </NavLink>
 
-          <p className="px-4 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 mt-6">Administrasi</p>
-          <NavLink to="/members" className={navLinkClass}>
-            <span className="material-icons">people</span>
-            Data Pelanggan
-          </NavLink>
-          <NavLink to="/reports" className={navLinkClass}>
-            <span className="material-icons">assessment</span>
-            Laporan &amp; Riwayat
-          </NavLink>
+          {MENU.map(grup => {
+            const item = grup.item.filter(i => !i.hanyaAdmin || bolehKelolaPengguna(currentUser?.role));
+            if (item.length === 0) return null;
 
-          <NavLink to="/master-data" className={navLinkClass}>
-            <span className="material-icons">tune</span>
-            Master Data
-          </NavLink>
+            const terbuka = grupTerbuka === grup.judul;
+            const memuatHalamanIni = grupAktif(location.pathname) === grup.judul;
 
-          {bolehKelolaPengguna(currentUser?.role) && (
-            <NavLink to="/admin" className={navLinkClass}>
-              <span className="material-icons">admin_panel_settings</span>
-              Pengguna
-            </NavLink>
-          )}
+            return (
+              <div key={grup.judul} className="pt-2">
+                <button
+                  onClick={() => setGrupTerbuka(terbuka ? null : grup.judul)}
+                  aria-expanded={terbuka}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors font-medium ${
+                    memuatHalamanIni && !terbuka ? 'text-white bg-slate-800' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  <span className="material-icons">{grup.ikon}</span>
+                  <span className="flex-1 text-left">{grup.judul}</span>
+                  <span className={`material-icons text-lg transition-transform ${terbuka ? 'rotate-180' : ''}`}>
+                    expand_more
+                  </span>
+                </button>
+
+                {terbuka && (
+                  <div className="mt-1 space-y-1 pl-3 border-l border-slate-800 ml-6">
+                    {item.map(i => (
+                      <NavLink key={i.to} to={i.to} className={navLinkClass}>
+                        <span className="material-icons text-lg">{i.ikon}</span>
+                        <span className="text-sm">{i.label}</span>
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </nav>
 
         <div className="p-4 border-t border-slate-800 bg-slate-900">

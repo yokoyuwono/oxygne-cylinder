@@ -257,6 +257,10 @@ const AKSI = [
   { label: 'Tukar Isi', ikon: 'swap_horiz', tujuan: '/tukar-isi', warna: 'bg-teal-50 text-teal-600 hover:bg-teal-100' },
   { label: 'Pengiriman', ikon: 'local_shipping', tujuan: '/delivery', warna: 'bg-cyan-50 text-cyan-600 hover:bg-cyan-100' },
   { label: 'Isi Ulang', ikon: 'local_gas_station', tujuan: '/refill', warna: 'bg-orange-50 text-orange-600 hover:bg-orange-100' },
+  // Dua sisi kas dipisah di sini walau halamannya sama: yang dicari saat menekan
+  // tombol ini selalu satu arah tertentu, dan tab yang salah adalah satu klik lagi.
+  { label: 'Uang Masuk', ikon: 'trending_up', tujuan: '/kas?jenis=masuk', warna: 'bg-green-50 text-green-600 hover:bg-green-100' },
+  { label: 'Uang Keluar', ikon: 'trending_down', tujuan: '/kas?jenis=keluar', warna: 'bg-rose-50 text-rose-600 hover:bg-rose-100' },
 ];
 
 const AksiCepat: React.FC<{ onBuka: (tujuan: string) => void }> = ({ onBuka }) => (
@@ -357,6 +361,8 @@ function ringkasAktivitas(
         return baris(tx, `Tukar isi ${sebutanBarang(tx)} ${member ? `untuk ${member.companyName}` : '(pembeli lepas)'}`, 'swap_horiz', 'text-teal-600 bg-teal-50');
       case 'EXPENSE':
         return baris(tx, `Biaya operasional: ${tx.description || 'tanpa keterangan'}`, 'receipt_long', 'text-rose-600 bg-rose-50');
+      case 'INCOME':
+        return baris(tx, `Penjualan: ${tx.description || 'tanpa keterangan'}`, 'trending_up', 'text-green-600 bg-green-50');
       default:
         // Jenis yang belum dikenal tetap muncul dengan namanya sendiri, bukan
         // gelembung kosong tanpa teks.

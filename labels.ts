@@ -39,6 +39,9 @@ export const JENIS_TRANSAKSI: Record<string, string> = {
   // Bukan sekadar 'Pengeluaran' -- biaya isi ulang ke vendor juga pengeluaran,
   // dan keduanya berdampingan di daftar riwayat.
   EXPENSE: 'Biaya Operasional',
+  // Sejalan dengan itu: sewa dan tukar isi juga pemasukan, jadi labelnya menyebut
+  // apa yang membedakannya -- barang yang dijual putus, bukan disewakan.
+  INCOME: 'Penjualan Lain',
 };
 
 export const STATUS_BAYAR: Record<string, string> = {

@@ -124,6 +124,11 @@ const HistoryView: React.FC<HistoryViewProps> = ({ transactions, cylinders, memb
                                     icon = 'receipt_long';
                                     colorClass = 'text-rose-600 bg-rose-50';
                                     break;
+                                case 'INCOME':
+                                    description = `Penjualan: ${tx.description || 'tanpa keterangan'}`;
+                                    icon = 'trending_up';
+                                    colorClass = 'text-green-600 bg-green-50';
+                                    break;
                                 default:
                                     // Jenis yang belum dikenal tetap muncul dengan namanya sendiri --
                                     // tanpa cabang ini barisnya kosong melompong.
