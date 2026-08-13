@@ -18,7 +18,7 @@ import GasExchangeView, { GasExchangePayload } from './components/GasExchangeVie
 import { NewRentalPayload } from './components/NewRentalForm';
 import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff } from './types';
 import { bolehKelolaPengguna } from './lib/peran';
-import PengeluaranView, { PengeluaranPayload } from './components/PengeluaranView';
+import KasView, { KasPayload } from './components/KasView';
 import { supabase, isSupabaseConfigured, fetchAllRecords } from './lib/supabase';
 
 /**
@@ -652,13 +652,17 @@ const App: React.FC = () => {
   };
 
   /**
-   * Belanja operasional harian. Tidak menyentuh tabung, pelanggan, atau stok --
-   * hanya uang keluar dengan keterangan, jadi cukup satu baris transaksi.
+   * Kas harian: belanja operasional (EXPENSE) dan penjualan lepas (INCOME).
+   *
+   * Keduanya satu handler karena bentuknya memang satu -- tidak menyentuh tabung,
+   * pelanggan, atau stok, hanya uang berpindah dengan keterangan. Barang seperti
+   * selang regulator dan kran oksigen dijual putus dan tidak pernah kembali, jadi
+   * tidak ada apa pun yang perlu diikuti setelah barisnya tercatat.
    */
-  const handleTambahPengeluaran = async (payload: PengeluaranPayload) => {
+  const handleCatatKas = async (payload: KasPayload) => {
     const tx: Transaction = {
-      id: `t-biaya-${Date.now()}`,
-      type: 'EXPENSE',
+      id: `t-${payload.jenis === 'INCOME' ? 'masuk' : 'biaya'}-${Date.now()}`,
+      type: payload.jenis,
       date: payload.date,
       cost: payload.amount,
       paymentStatus: 'PAID',
@@ -666,7 +670,7 @@ const App: React.FC = () => {
     };
 
     const { error } = await supabase.from('transactions').insert(tx);
-    if (error) throw new Error(`Gagal mencatat pengeluaran: ${error.message}`);
+    if (error) throw new Error(`Gagal mencatat: ${error.message}`);
 
     setTransactions(prev => [...prev, tx]);
   };
@@ -689,9 +693,9 @@ const App: React.FC = () => {
     await fetchData();
   };
 
-  const handleHapusPengeluaran = async (id: string) => {
+  const handleHapusKas = async (id: string) => {
     const { error } = await supabase.from('transactions').delete().eq('id', id);
-    if (error) throw new Error(`Gagal menghapus pengeluaran: ${error.message}`);
+    if (error) throw new Error(`Gagal menghapus catatan: ${error.message}`);
 
     setTransactions(prev => prev.filter(t => t.id !== id));
   };
@@ -894,14 +898,18 @@ const App: React.FC = () => {
               onSubmit={handleGasExchange}
             />
           } />
-          <Route path="/pengeluaran" element={
-            <PengeluaranView
+          <Route path="/kas" element={
+            <KasView
               transactions={transactions}
               role={currentUser.role}
-              onSubmit={handleTambahPengeluaran}
-              onDelete={handleHapusPengeluaran}
+              onSubmit={handleCatatKas}
+              onDelete={handleHapusKas}
             />
           } />
+
+          {/* Pengeluaran pindah jadi salah satu tab di /kas. Tautan lamanya ditahan
+              supaya penanda buku yang sudah dibuat orang tidak jatuh ke Beranda. */}
+          <Route path="/pengeluaran" element={<Navigate to="/kas?jenis=keluar" replace />} />
           <Route path="/rental" element={
             <RentalForm
               cylinders={cylinders}

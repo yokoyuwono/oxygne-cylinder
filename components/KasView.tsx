@@ -1,19 +1,24 @@
 import React, { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Transaction, UserRole } from '../types';
 import { formatIDR, formatTanggal } from '../labels';
 import { hariIni } from '../lib/laporanHarian';
 import { bolehLihatKeuanganPenuh } from '../lib/peran';
 
-export interface PengeluaranPayload {
+/** Uang masuk yang tidak lewat tabung, dan uang keluar di luar isi ulang. */
+export type JenisKas = 'INCOME' | 'EXPENSE';
+
+export interface KasPayload {
+  jenis: JenisKas;
   description: string;
   amount: number;
   date: string;
 }
 
-interface PengeluaranViewProps {
+interface KasViewProps {
   transactions: Transaction[];
   role?: UserRole;
-  onSubmit: (payload: PengeluaranPayload) => Promise<void>;
+  onSubmit: (payload: KasPayload) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }
 
@@ -23,16 +28,64 @@ const labelClass = 'block text-xs font-bold text-gray-500 uppercase mb-1.5';
 const BATAS_RIWAYAT = 10;
 
 /**
- * Belanja operasional harian -- galon air, ATK, tambahan solar mobil.
+ * Dua sisi kas harian yang sama-sama cuma keterangan dan nominal.
  *
- * Sengaja hanya keterangan dan nominal: yang dibeli terlalu beragam untuk dipaksa
- * masuk kategori, dan mengetik satu kalimat lebih cepat daripada memilih dari daftar
- * yang tidak pernah pas.
+ * PEMASUKAN menampung barang yang dijual putus dan tidak punya alur sendiri: selang
+ * regulator, kran oksigen, mur baut. Alur sewa dan tukar isi tidak bisa dipakai untuk
+ * itu -- keduanya menuntut tabung atau ukuran botol, sementara barang-barang ini tidak
+ * punya keduanya dan tidak pernah kembali.
+ *
+ * PENGELUARAN menampung belanja operasional harian -- galon air, ATK, solar mobil.
+ *
+ * Keduanya sengaja hanya keterangan dan nominal: yang dijual dan yang dibeli terlalu
+ * beragam untuk dipaksa masuk kategori, dan mengetik satu kalimat lebih cepat daripada
+ * memilih dari daftar yang tidak pernah pas. Karena bentuk isiannya persis sama,
+ * keduanya satu halaman dengan dua tab, bukan dua menu yang berjauhan di samping.
  *
  * Daftar di bawah form hanya untuk memastikan yang barusan diketik memang tersimpan,
  * bukan rekap -- totalnya ada di halaman Laporan.
  */
-const PengeluaranView: React.FC<PengeluaranViewProps> = ({ transactions, role, onSubmit, onDelete }) => {
+const KONFIG: Record<JenisKas, {
+  judul: string;
+  penjelasan: string;
+  contoh: string;
+  tombol: string;
+  ikon: string;
+  warnaNominal: string;
+  warnaTombol: string;
+  kosong: string;
+}> = {
+  INCOME: {
+    judul: 'Uang Masuk',
+    penjelasan: 'Penjualan lepas di luar sewa dan tukar isi — selang regulator, kran oksigen, dan sejenisnya.',
+    contoh: 'Contoh: Selang regulator 2 meter',
+    tombol: 'Catat Pemasukan',
+    ikon: 'trending_up',
+    warnaNominal: 'text-green-600',
+    warnaTombol: 'bg-green-600 hover:bg-green-700',
+    kosong: 'Belum ada pemasukan lain yang dicatat.',
+  },
+  EXPENSE: {
+    judul: 'Uang Keluar',
+    penjelasan: 'Belanja operasional di luar isi ulang gas — galon air, ATK, solar mobil, dan sejenisnya.',
+    contoh: 'Contoh: Galon air 2 buah',
+    tombol: 'Catat Pengeluaran',
+    ikon: 'trending_down',
+    warnaNominal: 'text-red-600',
+    warnaTombol: 'bg-indigo-600 hover:bg-indigo-700',
+    kosong: 'Belum ada pengeluaran yang dicatat.',
+  },
+};
+
+/** Tab dibaca dari URL supaya tautan seperti /kas?jenis=keluar langsung membuka sisi yang benar. */
+const dariUrl = (nilai: string | null): JenisKas => (nilai === 'keluar' ? 'EXPENSE' : 'INCOME');
+const keUrl = (jenis: JenisKas) => (jenis === 'EXPENSE' ? 'keluar' : 'masuk');
+
+const KasView: React.FC<KasViewProps> = ({ transactions, role, onSubmit, onDelete }) => {
+  const [paramUrl, setParamUrl] = useSearchParams();
+  const jenis = dariUrl(paramUrl.get('jenis'));
+  const konfig = KONFIG[jenis];
+
   const [keterangan, setKeterangan] = useState('');
   const [nominal, setNominal] = useState('');
   const [tanggal, setTanggal] = useState(hariIni);
@@ -40,16 +93,26 @@ const PengeluaranView: React.FC<PengeluaranViewProps> = ({ transactions, role, o
   const [feedback, setFeedback] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [akanDihapus, setAkanDihapus] = useState<Transaction | null>(null);
 
-  // Menghapus catatan pengeluaran ditahan di Administrator -- salah ketik memang
-  // perlu bisa dibetulkan, tapi bukan oleh orang yang mencatat belanjanya sendiri.
+  // Menghapus catatan kas ditahan di Administrator -- salah ketik memang perlu bisa
+  // dibetulkan, tapi bukan oleh orang yang mencatat uangnya sendiri.
   const bolehHapus = bolehLihatKeuanganPenuh(role);
 
   const riwayat = useMemo(
     () => transactions
-      .filter(t => t.type === 'EXPENSE')
+      .filter(t => t.type === jenis)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, BATAS_RIWAYAT),
-    [transactions]);
+    [transactions, jenis]);
+
+  const gantiJenis = (baru: JenisKas) => {
+    if (baru === jenis) return;
+    setParamUrl({ jenis: keUrl(baru) }, { replace: true });
+    // Isian dikosongkan: kalimat yang sudah diketik untuk satu sisi hampir tidak
+    // pernah benar untuk sisi lainnya, dan menyisakannya mengundang salah catat arah.
+    setKeterangan('');
+    setNominal('');
+    setFeedback(null);
+  };
 
   const jumlah = Number(nominal) || 0;
   const siap = keterangan.trim().length > 0 && jumlah > 0 && Boolean(tanggal);
@@ -59,8 +122,8 @@ const PengeluaranView: React.FC<PengeluaranViewProps> = ({ transactions, role, o
 
     setBusy(true);
     try {
-      await onSubmit({ description: keterangan.trim(), amount: jumlah, date: new Date(tanggal).toISOString() });
-      setFeedback({ msg: `Pengeluaran ${formatIDR(jumlah)} tercatat.`, type: 'success' });
+      await onSubmit({ jenis, description: keterangan.trim(), amount: jumlah, date: new Date(tanggal).toISOString() });
+      setFeedback({ msg: `${konfig.judul} ${formatIDR(jumlah)} tercatat.`, type: 'success' });
       setKeterangan('');
       setNominal('');
       setTimeout(() => setFeedback(null), 3500);
@@ -75,7 +138,7 @@ const PengeluaranView: React.FC<PengeluaranViewProps> = ({ transactions, role, o
     if (!akanDihapus) return;
     try {
       await onDelete(akanDihapus.id);
-      setFeedback({ msg: 'Pengeluaran dihapus.', type: 'success' });
+      setFeedback({ msg: 'Catatan dihapus.', type: 'success' });
       setTimeout(() => setFeedback(null), 3500);
     } catch (e) {
       setFeedback({ msg: e instanceof Error ? e.message : 'Gagal menghapus.', type: 'error' });
@@ -84,13 +147,27 @@ const PengeluaranView: React.FC<PengeluaranViewProps> = ({ transactions, role, o
     }
   };
 
+  const tabClass = (milik: JenisKas) =>
+    `flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all ${
+      jenis === milik ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'
+    }`;
+
   return (
     <div className="max-w-5xl mx-auto space-y-5 animate-fade-in-up pb-20 md:pb-0">
       <div>
-        <h1 className="text-2xl font-bold text-gray-800">Pengeluaran</h1>
-        <p className="text-gray-500 text-sm">
-          Belanja operasional di luar isi ulang gas &mdash; galon air, ATK, solar mobil, dan sejenisnya.
-        </p>
+        <h1 className="text-2xl font-bold text-gray-800">Uang Masuk &amp; Keluar</h1>
+        <p className="text-gray-500 text-sm">{konfig.penjelasan}</p>
+      </div>
+
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl border border-gray-200 max-w-md">
+        <button onClick={() => gantiJenis('INCOME')} className={tabClass('INCOME')}>
+          <span className="material-icons text-lg text-green-600">trending_up</span>
+          Uang Masuk
+        </button>
+        <button onClick={() => gantiJenis('EXPENSE')} className={tabClass('EXPENSE')}>
+          <span className="material-icons text-lg text-red-500">trending_down</span>
+          Uang Keluar
+        </button>
       </div>
 
       {feedback && (
@@ -110,13 +187,13 @@ const PengeluaranView: React.FC<PengeluaranViewProps> = ({ transactions, role, o
               onChange={e => setKeterangan(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') simpan(); }}
               className={inputClass}
-              placeholder="Contoh: Galon air 2 buah"
+              placeholder={konfig.contoh}
             />
           </div>
           <div>
-            <label className={labelClass} htmlFor="tanggal-pengeluaran">Tanggal</label>
+            <label className={labelClass} htmlFor="tanggal-kas">Tanggal</label>
             <input
-              id="tanggal-pengeluaran"
+              id="tanggal-kas"
               type="date"
               value={tanggal}
               max={hariIni()}
@@ -146,17 +223,17 @@ const PengeluaranView: React.FC<PengeluaranViewProps> = ({ transactions, role, o
           <button
             onClick={simpan}
             disabled={!siap || busy}
-            className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2"
+            className={`w-full py-3 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 ${konfig.warnaTombol}`}
           >
             <span className="material-icons text-lg">{busy ? 'hourglass_top' : 'save'}</span>
-            {busy ? 'Menyimpan...' : 'Catat Pengeluaran'}
+            {busy ? 'Menyimpan...' : konfig.tombol}
           </button>
         </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-5 border-b border-gray-100">
-          <h2 className="font-bold text-gray-800">Pengeluaran Terakhir</h2>
+          <h2 className="font-bold text-gray-800">{konfig.judul} Terakhir</h2>
           <p className="text-xs text-gray-500 mt-0.5">
             {BATAS_RIWAYAT} catatan terbaru. Rekap totalnya ada di halaman Laporan.
           </p>
@@ -178,7 +255,7 @@ const PengeluaranView: React.FC<PengeluaranViewProps> = ({ transactions, role, o
                   <tr key={t.id} className="hover:bg-gray-50">
                     <td className="px-5 py-3 text-gray-500 whitespace-nowrap">{formatTanggal(t.date)}</td>
                     <td className="px-5 py-3 text-gray-800">{t.description || '-'}</td>
-                    <td className="px-5 py-3 text-right font-bold text-red-600 whitespace-nowrap">{formatIDR(t.cost || 0)}</td>
+                    <td className={`px-5 py-3 text-right font-bold whitespace-nowrap ${konfig.warnaNominal}`}>{formatIDR(t.cost || 0)}</td>
                     {bolehHapus && (
                       <td className="px-5 py-3 text-right">
                         <button
@@ -197,8 +274,8 @@ const PengeluaranView: React.FC<PengeluaranViewProps> = ({ transactions, role, o
           </div>
         ) : (
           <div className="p-10 text-center">
-            <span className="material-icons text-4xl text-gray-200 mb-2 block">receipt_long</span>
-            <p className="text-sm text-gray-400">Belum ada pengeluaran yang dicatat.</p>
+            <span className="material-icons text-4xl text-gray-200 mb-2 block">{konfig.ikon}</span>
+            <p className="text-sm text-gray-400">{konfig.kosong}</p>
           </div>
         )}
       </div>
@@ -208,7 +285,7 @@ const PengeluaranView: React.FC<PengeluaranViewProps> = ({ transactions, role, o
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-fade-in-up">
             <div className="p-6 text-center">
               <span className="material-icons text-4xl text-red-500 mb-3 block">delete_forever</span>
-              <h3 className="font-bold text-gray-800 mb-2">Hapus Pengeluaran?</h3>
+              <h3 className="font-bold text-gray-800 mb-2">Hapus Catatan Ini?</h3>
               <p className="text-sm text-gray-600 mb-6">
                 <strong>{akanDihapus.description}</strong> sebesar {formatIDR(akanDihapus.cost || 0)} akan dihapus dari laporan.
               </p>
@@ -224,4 +301,4 @@ const PengeluaranView: React.FC<PengeluaranViewProps> = ({ transactions, role, o
   );
 };
 
-export default PengeluaranView;
+export default KasView;

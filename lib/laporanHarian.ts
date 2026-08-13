@@ -9,9 +9,13 @@ import { Transaction } from '../types';
  * akan berselisih dan tidak ada yang tahu mana yang benar.
  */
 
-/** Tukar isi juga pendapatan; kalau hanya RENTAL_OUT yang dihitung, penjualan gas ke pembeli lepas hilang. */
+/**
+ * Tukar isi juga pendapatan; kalau hanya RENTAL_OUT yang dihitung, penjualan gas ke
+ * pembeli lepas hilang. INCOME menampung penjualan lepas yang tidak lewat tabung
+ * sama sekali -- selang regulator, kran oksigen, dan sejenisnya.
+ */
 export const barisPendapatan = (t: Transaction) =>
-  (t.type === 'RENTAL_OUT' || t.type === 'GAS_EXCHANGE') && (t.cost || 0) > 0;
+  (t.type === 'RENTAL_OUT' || t.type === 'GAS_EXCHANGE' || t.type === 'INCOME') && (t.cost || 0) > 0;
 
 /** Biaya isi ulang ke vendor dan belanja operasional harian sama-sama uang keluar. */
 export const barisPengeluaran = (t: Transaction) =>
