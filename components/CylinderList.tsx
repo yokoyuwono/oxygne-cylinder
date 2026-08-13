@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Cylinder, CylinderStatus, GasType, CylinderSize, Transaction } from '../types';
 import { labelStatusTabung, formatTanggal } from '../labels';
 import { supabase } from '../lib/supabase';
+import { cariDiKolom } from '../lib/cari';
 
 interface CylinderListProps {
   cylinders: Cylinder[]; // Kept for interface compatibility, but we use server fetch for the list
@@ -70,7 +71,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
       // Apply Search Filter (Server-side ILIKE)
       if (debouncedSearch) {
         // Search by serialCode OR gasType
-        query = query.or(`serialCode.ilike.%${debouncedSearch}%,gasType.ilike.%${debouncedSearch}%`);
+        query = query.or(cariDiKolom(['serialCode', 'gasType'], debouncedSearch));
       }
 
       // Apply Pagination

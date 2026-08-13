@@ -3,6 +3,7 @@ import { Member, MemberPrice, Transaction, Cylinder, MemberStatus, RentalTariff 
 import { labelStatusAnggota, labelStatusTabung, labelJenisTransaksi, formatTanggal } from '../labels';
 import { supabase } from '../lib/supabase';
 import { HARI_MASA_TUNGGU, RingkasanHolding, hitungSemuaHolding, hitungStatusMasaTunggu } from '../lib/memberExit';
+import { cariDiKolom } from '../lib/cari';
 
 interface MembersViewProps {
     members: Member[];
@@ -112,7 +113,7 @@ const MembersView: React.FC<MembersViewProps> = ({
             let query = supabase.from('members').select('*', { count: 'exact' });
 
             if (debouncedSearch) {
-                query = query.or(`name.ilike.%${debouncedSearch}%,companyName.ilike.%${debouncedSearch}%`);
+                query = query.or(cariDiKolom(['name', 'companyName'], debouncedSearch));
             }
 
             const from = (currentPage - 1) * ITEMS_PER_PAGE;
