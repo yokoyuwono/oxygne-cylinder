@@ -309,6 +309,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           case 'REFILL_OUT': return { title: `Kirim Isi Ulang ${code}`, subtitle: `Ke ${station?.name}`, icon: 'local_shipping', color: 'bg-orange-100 text-orange-600', badge: 'KIRIM' };
           case 'REFILL_IN': return { title: `Diterima Kembali ${code}`, subtitle: tampilkanNominal ? `Biaya: ${t.cost ? formatIDR(t.cost) : '-'}` : `Dari ${station?.name || 'isi ulang'}`, icon: 'inventory_2', color: 'bg-indigo-100 text-indigo-600', badge: 'TERIMA' };
           case 'DEBT_PAYMENT': return { title: 'Pembayaran Utang', subtitle: `Dari ${member?.companyName}`, icon: 'payments', color: 'bg-teal-100 text-teal-600', badge: 'BAYAR' };
+          case 'DEBT_ADD': return { title: t.description || 'Bon Dicatat', subtitle: `Atas nama ${member?.companyName}`, icon: 'post_add', color: 'bg-amber-100 text-amber-600', badge: 'BON' };
           case 'DEPOSIT_REFUND': return { title: 'Pengembalian Deposit', subtitle: `Ke ${member?.companyName}`, icon: 'savings', color: 'bg-purple-100 text-purple-600', badge: 'REFUND' };
           case 'DELIVERY': return { title: `Pengiriman ${code}`, subtitle: 'Dalam Perjalanan', icon: 'local_shipping', color: 'bg-cyan-100 text-cyan-600', badge: 'ANTAR' };
           case 'GAS_EXCHANGE': return { title: `Tukar Isi ${sebutanBarang(t)}`, subtitle: member ? `Untuk ${member.companyName}` : 'Pembeli lepas', icon: 'swap_horiz', color: 'bg-teal-100 text-teal-600', badge: 'TUKAR' };
@@ -325,6 +326,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           case 'REFILL_OUT': return 'bg-orange-100 text-orange-800';
           case 'REFILL_IN': return 'bg-indigo-100 text-indigo-800';
           case 'DEBT_PAYMENT': return 'bg-teal-100 text-teal-800';
+          case 'DEBT_ADD': return 'bg-amber-100 text-amber-800';
           case 'DEPOSIT_REFUND': return 'bg-purple-100 text-purple-800';
           case 'DELIVERY': return 'bg-cyan-100 text-cyan-800';
           case 'GAS_EXCHANGE': return 'bg-teal-100 text-teal-800';
@@ -765,6 +767,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                       <option value="REFILL_OUT">Kirim Isi Ulang</option>
                       <option value="REFILL_IN">Terima Isi Ulang</option>
                       <option value="DEBT_PAYMENT">Pembayaran Utang</option>
+                      <option value="DEBT_ADD">Bon Dicatat</option>
                       <option value="DEPOSIT_REFUND">Pengembalian Deposit</option>
                       <option value="DELIVERY">Pengiriman</option>
                       <option value="GAS_EXCHANGE">Tukar Isi</option>

@@ -43,6 +43,7 @@ const MENU: GrupMenu[] = [
       { to: '/rental', ikon: 'shopping_cart_checkout', label: 'Tukar Besar & Sewa' },
       { to: '/tukar-isi', ikon: 'swap_horiz', label: 'Tukar Kecil' },
       { to: '/kas', ikon: 'account_balance_wallet', label: 'Uang Masuk & Keluar' },
+      { to: '/bon', ikon: 'receipt_long', label: 'Bon Pelanggan' },
     ],
   },
   {
@@ -50,7 +51,7 @@ const MENU: GrupMenu[] = [
     ikon: 'inventory_2',
     item: [
       { to: '/delivery', ikon: 'local_shipping', label: 'Pengiriman' },
-      { to: '/refill', ikon: 'local_gas_station', label: 'Manajemen Isi Ulang' },
+      { to: '/refill', ikon: 'local_gas_station', label: 'Pabrik' },
       { to: '/inventory', ikon: 'inventory_2', label: 'Stok Tabung' },
     ],
   },

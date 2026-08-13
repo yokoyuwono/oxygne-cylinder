@@ -124,7 +124,7 @@ export function hitungAntrianTindakan(
       ikon: 'receipt_long',
       teks: `${berbon.length} pelanggan punya bon belum lunas`,
       detail: formatIDR(totalBon),
-      tujuan: '/members',
+      tujuan: '/bon',
       nada: 'peringatan',
     });
   }

@@ -139,7 +139,7 @@ export interface Transaction {
   cylinderId?: string; // Optional for DEBT_PAYMENT
   memberId?: string;
   refillStationId?: string; // For refill transactions
-  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEPOSIT_REFUND' | 'DELIVERY' | 'GAS_EXCHANGE' | 'EXPENSE' | 'INCOME';
+  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEBT_ADD' | 'DEPOSIT_REFUND' | 'DELIVERY' | 'GAS_EXCHANGE' | 'EXPENSE' | 'INCOME';
   date: string;
   rentalDuration?: number; // Days held (relevant for RETURN type)
   cost?: number; // Revenue only -- rental fee + gas + regulator. Deposit is NOT included.
