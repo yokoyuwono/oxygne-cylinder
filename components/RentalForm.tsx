@@ -4,6 +4,7 @@ import { Cylinder, CylinderStatus, Member, MemberPrice, Transaction, GasPrice, R
 import { supabase } from '../lib/supabase';
 import NewRentalForm, { NewRentalPayload } from './NewRentalForm';
 import { hitungHoldingCurah, hitungHoldingRegulator } from '../lib/bulkStock';
+import { cariDiKolom } from '../lib/cari';
 
 interface RentalFormProps {
     cylinders: Cylinder[];
@@ -83,7 +84,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
 
                 if (debouncedMemberQuery) {
                     // ILIKE for case insensitive search on multiple fields
-                    query = query.or(`companyName.ilike.%${debouncedMemberQuery}%,name.ilike.%${debouncedMemberQuery}%,address.ilike.%${debouncedMemberQuery}%`);
+                    query = query.or(cariDiKolom(['companyName', 'name', 'address'], debouncedMemberQuery));
                 } else {
                     // Default view (e.g. recently active or alphabetical)
                     query = query.order('companyName', { ascending: true });
@@ -118,7 +119,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                     .from('cylinders')
                     .select('*')
                     .in('status', [CylinderStatus.Available, CylinderStatus.Delivery])
-                    .or(`serialCode.ilike.%${query}%,gasType.ilike.%${query}%`)
+                    .or(cariDiKolom(['serialCode', 'gasType'], query))
                     .limit(10); // Limit results for performance
 
                 if (data) {

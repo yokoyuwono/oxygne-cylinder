@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Cylinder, CylinderStatus } from '../types';
 import { supabase } from '../lib/supabase';
+import { cariDiKolom } from '../lib/cari';
 
 interface DeliveryViewProps {
   cylinders: Cylinder[]; // Kept for interface compatibility, but unused for the main list
@@ -42,7 +43,7 @@ const DeliveryView: React.FC<DeliveryViewProps> = ({ onDeliver }) => {
             .eq('status', CylinderStatus.Available);
 
           if (debouncedSearch) {
-              query = query.or(`serialCode.ilike.%${debouncedSearch}%,gasType.ilike.%${debouncedSearch}%`);
+              query = query.or(cariDiKolom(['serialCode', 'gasType'], debouncedSearch));
           }
 
           const from = (currentPage - 1) * ITEMS_PER_PAGE;
