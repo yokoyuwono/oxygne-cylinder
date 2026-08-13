@@ -66,7 +66,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
 
         <div className="space-y-6">
           <AksiCepat onBuka={navigate} />
-          <BonPelanggan bon={bon} onBuka={() => navigate('/members')} />
+          <BonPelanggan bon={bon} onBuka={() => navigate('/bon')} />
         </div>
       </div>
 
@@ -354,6 +354,8 @@ function ringkasAktivitas(
         return baris(tx, `Mengembalikan deposit ke ${member?.companyName}`, 'savings', 'text-purple-600 bg-purple-50');
       case 'DEBT_PAYMENT':
         return baris(tx, `Pembayaran utang dari ${member?.companyName}`, 'payments', 'text-emerald-600 bg-emerald-50');
+      case 'DEBT_ADD':
+        return baris(tx, `Bon dicatat atas nama ${member?.companyName}`, 'post_add', 'text-amber-600 bg-amber-50');
       case 'DELIVERY':
         return baris(tx, `Mengirim ${barang} untuk pengiriman`, 'local_shipping', 'text-cyan-600 bg-cyan-50');
       case 'GAS_EXCHANGE':

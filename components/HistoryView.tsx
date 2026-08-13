@@ -108,6 +108,11 @@ const HistoryView: React.FC<HistoryViewProps> = ({ transactions, cylinders, memb
                                     icon = 'payments';
                                     colorClass = 'text-emerald-600 bg-emerald-50';
                                     break;
+                                case 'DEBT_ADD':
+                                    description = `Bon dicatat atas nama ${member?.companyName}`;
+                                    icon = 'post_add';
+                                    colorClass = 'text-amber-600 bg-amber-50';
+                                    break;
                                 case 'DELIVERY':
                                     description = `Mengirim ${sebutanBarang(tx, cyl?.serialCode)} untuk pengiriman`;
                                     icon = 'local_shipping';

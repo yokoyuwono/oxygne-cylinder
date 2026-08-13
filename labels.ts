@@ -34,6 +34,9 @@ export const JENIS_TRANSAKSI: Record<string, string> = {
   REFILL_IN: 'Terima Isi Ulang',
   DELIVERY: 'Pengiriman',
   DEBT_PAYMENT: 'Pembayaran Utang',
+  // Bon yang dicatat langsung, bukan turunan sewa atau tukar isi -- biasanya
+  // tagihan yang sudah berjalan di buku sebelum sistem ini dipakai.
+  DEBT_ADD: 'Bon Dicatat',
   DEPOSIT_REFUND: 'Pengembalian Deposit',
   GAS_EXCHANGE: 'Tukar Isi',
   // Bukan sekadar 'Pengeluaran' -- biaya isi ulang ke vendor juga pengeluaran,

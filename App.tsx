@@ -19,6 +19,7 @@ import { NewRentalPayload } from './components/NewRentalForm';
 import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff } from './types';
 import { bolehKelolaPengguna } from './lib/peran';
 import KasView, { KasPayload } from './components/KasView';
+import BonView, { BayarBonPayload, TambahBonPayload } from './components/BonView';
 import { supabase, isSupabaseConfigured, fetchAllRecords } from './lib/supabase';
 
 /**
@@ -286,14 +287,32 @@ const App: React.FC = () => {
     if (!error) setMembers(prev => prev.filter(m => m.id !== id));
   };
 
-  const handlePayDebt = async (memberId: string, amount: number, billIds: string[]) => {
+  /**
+   * Pembayaran bon, baik dicicil maupun dilunasi sekaligus.
+   *
+   * `opsi` menampung dua hal yang hanya dipakai halaman Bon: tanggal uangnya
+   * benar-benar diterima (bon sering dibayar saat pelanggan mampir, dan baru
+   * dicatat kemudian), dan catatan singkat untuk membedakan cicilan yang
+   * berulang. Keduanya opsional supaya pemanggil lama di detail pelanggan tidak
+   * perlu ikut berubah.
+   */
+  const handlePayDebt = async (
+    memberId: string,
+    amount: number,
+    billIds: string[],
+    opsi?: { date?: string; description?: string }
+  ) => {
     const member = members.find(m => m.id === memberId);
-    if (!member) return;
+    if (!member) throw new Error('Pelanggan tidak ditemukan.');
 
     const newDebt = Math.max(0, member.totalDebt - amount);
 
     // 1. Update Member
-    await supabase.from('members').update({ totalDebt: newDebt }).eq('id', memberId);
+    // Kegagalan dilempar, bukan didiamkan: halaman Bon menampilkan pesan berhasil
+    // begitu fungsi ini selesai, jadi error yang ditelan berarti petugas mengira
+    // uangnya sudah tercatat padahal tidak.
+    const { error: errMember } = await supabase.from('members').update({ totalDebt: newDebt }).eq('id', memberId);
+    if (errMember) throw new Error(errMember.message);
     setMembers(prev => prev.map(m => m.id === memberId ? { ...m, totalDebt: newDebt } : m));
 
     // 2. Mark Bills Paid
@@ -307,13 +326,54 @@ const App: React.FC = () => {
       id: `t-pay-${Date.now()}`,
       memberId: memberId,
       type: 'DEBT_PAYMENT',
-      date: new Date().toISOString(),
+      date: opsi?.date || new Date().toISOString(),
       cost: amount,
       paymentStatus: 'PAID',
-      relatedTransactionIds: billIds
+      relatedTransactionIds: billIds,
+      description: opsi?.description
     };
-    await supabase.from('transactions').insert(newTx);
+    const { error: errTx } = await supabase.from('transactions').insert(newTx);
+    if (errTx) throw new Error(errTx.message);
     setTransactions(prev => [...prev, newTx]);
+  };
+
+  /**
+   * Mencatat bon yang tidak lahir dari sewa atau tukar isi di sistem ini.
+   *
+   * Yang ditampung terutama tagihan yang sudah berjalan di buku sebelum sistem
+   * dipakai. Barisnya sengaja tidak dihitung sebagai pendapatan (lihat
+   * barisPendapatan di lib/laporanHarian.ts): barangnya sudah terjual entah kapan,
+   * jadi memasukkannya ke laporan hari ini akan mengarang omzet. Yang dicatat di
+   * sini murni piutang; sewa kredit yang baru tetap lewat halaman Tukar Besar &
+   * Sewa supaya penjualannya ikut terhitung.
+   */
+  const handleTambahBon = async (memberId: string, amount: number, date: string) => {
+    const member = members.find(m => m.id === memberId);
+    if (!member) throw new Error('Pelanggan tidak ditemukan.');
+
+    const newTx: Transaction = {
+      id: `t-bon-${Date.now()}`,
+      memberId,
+      type: 'DEBT_ADD',
+      date,
+      cost: amount,
+      paymentStatus: 'UNPAID'
+    };
+
+    const { error: errTx } = await supabase.from('transactions').insert(newTx);
+    if (errTx) throw new Error(errTx.message);
+
+    // Baru setelah barisnya tersimpan: kalau urutannya dibalik dan insert gagal,
+    // yang tertinggal adalah angka bon tanpa asal-usul -- persis kekacauan yang
+    // baru saja dibersihkan lewat migrasi nolkan_bon_sisa.
+    const newDebt = (member.totalDebt || 0) + amount;
+    const { error: errMember } = await supabase.from('members')
+      .update({ totalDebt: newDebt })
+      .eq('id', memberId);
+    if (errMember) throw new Error(errMember.message);
+
+    setTransactions(prev => [...prev, newTx]);
+    setMembers(prev => prev.map(m => m.id === memberId ? { ...m, totalDebt: newDebt } : m));
   };
 
   const handleMemberExitRequest = async (memberId: string) => {
@@ -910,6 +970,16 @@ const App: React.FC = () => {
           {/* Pengeluaran pindah jadi salah satu tab di /kas. Tautan lamanya ditahan
               supaya penanda buku yang sudah dibuat orang tidak jatuh ke Beranda. */}
           <Route path="/pengeluaran" element={<Navigate to="/kas?jenis=keluar" replace />} />
+          <Route path="/bon" element={
+            <BonView
+              members={members}
+              transactions={transactions}
+              onBayar={(p: BayarBonPayload) =>
+                handlePayDebt(p.memberId, p.jumlah, p.billIds, { date: p.tanggal, description: p.catatan })}
+              onTambah={(p: TambahBonPayload) =>
+                handleTambahBon(p.memberId, p.jumlah, p.tanggal)}
+            />
+          } />
           <Route path="/rental" element={
             <RentalForm
               cylinders={cylinders}
