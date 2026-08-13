@@ -1,7 +1,7 @@
 ﻿
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Cylinder, CylinderStatus, GasType, CylinderSize, Transaction } from '../types';
-import { labelStatusTabung } from '../labels';
+import { labelStatusTabung, formatTanggal } from '../labels';
 import { supabase } from '../lib/supabase';
 
 interface CylinderListProps {
@@ -350,6 +350,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                     <th className="px-6 py-3">Jenis Gas</th>
                     <th className="px-6 py-3">Ukuran</th>
                     <th className="px-6 py-3">Status</th>
+                    <th className="px-6 py-3">Tanggal Sewa</th>
                     <th className="px-6 py-3">Lokasi</th>
                     <th className="px-6 py-3 text-right">Aksi</th>
                 </tr>
@@ -377,6 +378,13 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                             )}
                             </div>
                         </td>
+                        {/* Tanggal tabung mulai dipegang pemegangnya sekarang. Tabung yang tidak
+                            tercatat tanggalnya di buku opname dibiarkan kosong, bukan ditebak. */}
+                        <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
+                            {cyl.heldSince
+                                ? formatTanggal(cyl.heldSince, { day: 'numeric', month: 'short', year: 'numeric' })
+                                : <span className="text-gray-300">&mdash;</span>}
+                        </td>
                         <td className="px-6 py-4 text-gray-500">{cyl.lastLocation}</td>
                         <td className="px-6 py-4 text-right">
                             <div className="flex justify-end gap-2">
@@ -393,7 +401,7 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                     })
                 ) : (
                     <tr>
-                    <td colSpan={6} className="px-6 py-20 text-center text-gray-400">
+                    <td colSpan={7} className="px-6 py-20 text-center text-gray-400">
                         <span className="material-icons text-4xl mb-2 text-gray-300">search_off</span>
                         <p>Tidak ada tabung yang cocok dengan pencarian Anda.</p>
                     </td>

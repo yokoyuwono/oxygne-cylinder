@@ -387,7 +387,8 @@ const App: React.FC = () => {
     await supabase.from('cylinders').update({
       status: CylinderStatus.Refilling,
       currentHolder: null, // 'RefillStation' logical
-      lastLocation: station.name
+      lastLocation: station.name,
+      heldSince: null // tidak lagi di tangan pelanggan
     }).in('id', cylinderIds);
 
     // Add Transactions
@@ -399,7 +400,8 @@ const App: React.FC = () => {
           ...c,
           status: CylinderStatus.Refilling,
           currentHolder: 'RefillStation',
-          lastLocation: station.name
+          lastLocation: station.name,
+          heldSince: null
         };
       }
       return c;
@@ -422,7 +424,8 @@ const App: React.FC = () => {
     await supabase.from('cylinders').update({
       status: CylinderStatus.Available,
       currentHolder: null,
-      lastLocation: 'Gudang Utama'
+      lastLocation: 'Gudang Utama',
+      heldSince: null
     }).in('id', cylinderIds);
 
     await supabase.from('transactions').insert(newTransactions);
@@ -433,7 +436,8 @@ const App: React.FC = () => {
           ...c,
           status: CylinderStatus.Available,
           currentHolder: undefined,
-          lastLocation: 'Gudang Utama'
+          lastLocation: 'Gudang Utama',
+          heldSince: null
         };
       }
       return c;
@@ -564,6 +568,9 @@ const App: React.FC = () => {
         // dari data yang sudah ada, untuk yang baru companyName memang disalin
         // dari namanya (lihat pembuatan `baru` di atas).
         lastLocation: members.find(m => m.id === memberId)?.companyName || member.name,
+        // Tanggal sewa, bukan tanggal input: sewa yang dicatat menyusul tetap
+        // terhitung sejak tabungnya benar-benar keluar.
+        heldSince: rentalDate.slice(0, 10),
       }).in('id', cylinderIds);
       if (errCyl) throw new Error(`Gagal memperbarui status tabung: ${errCyl.message}`);
     }
@@ -769,7 +776,8 @@ const App: React.FC = () => {
       await supabase.from('cylinders').update({
         status: CylinderStatus.Rented,
         currentHolder: memberId,
-        lastLocation: member.companyName
+        lastLocation: member.companyName,
+        heldSince: date.slice(0, 10)
       }).in('id', rentCylinderIds);
 
       rentCylinderIds.forEach(id => {
@@ -787,10 +795,14 @@ const App: React.FC = () => {
 
     // 2. Process Returns
     if (returnCylinderIds.length > 0) {
+      // heldSince ikut dikosongkan: kolomnya menerangkan pemegang saat ini, dan
+      // tabung ini sudah tidak dipegang siapa pun. Riwayatnya tetap ada di
+      // transaksi RENTAL_OUT/RETURN.
       await supabase.from('cylinders').update({
         status: CylinderStatus.EmptyRefill,
         currentHolder: null,
-        lastLocation: 'Gudang Utama'
+        lastLocation: 'Gudang Utama',
+        heldSince: null
       }).in('id', returnCylinderIds);
 
       returnCylinderIds.forEach(id => {
@@ -822,10 +834,10 @@ const App: React.FC = () => {
       // Simple refresh logic for cylinders to ensure sync:
       const updatedCylinders = cylinders.map(c => {
         if (rentCylinderIds.includes(c.id)) {
-          return { ...c, status: CylinderStatus.Rented, currentHolder: memberId, lastLocation: member.companyName };
+          return { ...c, status: CylinderStatus.Rented, currentHolder: memberId, lastLocation: member.companyName, heldSince: date.slice(0, 10) };
         }
         if (returnCylinderIds.includes(c.id)) {
-          return { ...c, status: CylinderStatus.EmptyRefill, currentHolder: undefined, lastLocation: 'Gudang Utama' };
+          return { ...c, status: CylinderStatus.EmptyRefill, currentHolder: undefined, lastLocation: 'Gudang Utama', heldSince: null };
         }
         return c;
       });

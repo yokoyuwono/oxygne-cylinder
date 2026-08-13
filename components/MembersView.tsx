@@ -19,6 +19,21 @@ interface MembersViewProps {
     onProcessRefund: (memberId: string, amount: number) => void;
 }
 
+/**
+ * Sudah berapa lama tabung ada di tangan pelanggan, dihitung dari tanggal mulai
+ * dipegang. Ditulis kasar (hari, lalu bulan, lalu tahun) karena yang dicari petugas
+ * adalah "ini sudah lama atau belum", bukan selisih yang persis.
+ */
+const lamaDipegang = (sejak: string): string => {
+    const hari = Math.floor((Date.now() - new Date(sejak).getTime()) / (1000 * 60 * 60 * 24));
+    if (hari < 0) return '';
+    if (hari < 60) return `${hari} hari`;
+    if (hari < 365) return `${Math.floor(hari / 30)} bulan`;
+    const tahun = Math.floor(hari / 365);
+    const bulan = Math.floor((hari % 365) / 30);
+    return bulan > 0 ? `${tahun} thn ${bulan} bln` : `${tahun} thn`;
+};
+
 const MembersView: React.FC<MembersViewProps> = ({
     members: initialMembers, // Renamed to avoid confusion, though we rely on server fetch now for the list
     prices,
@@ -535,13 +550,17 @@ const MembersView: React.FC<MembersViewProps> = ({
                             <div>
                                 <h3 className="font-bold text-gray-800 mb-3 text-sm uppercase tracking-wider">Tabung Dipegang</h3>
                                 {memberHoldings.length > 0 ? (
-                                    <div className="border border-gray-200 rounded-lg overflow-hidden">
-                                        <table className="w-full text-sm text-left">
+                                    <div className="border border-gray-200 rounded-lg overflow-x-auto">
+                                        {/* Kolom tanggalnya membuat tabel ini lebih lebar dari panel detail di
+                                            layar sempit; tanpa geser mendatar kolom paling kanan terpotong dan
+                                            tidak bisa dijangkau sama sekali. */}
+                                        <table className="w-full text-sm text-left min-w-[32rem]">
                                             <thead className="bg-gray-50 text-gray-500 font-medium">
                                                 <tr>
                                                     <th className="px-4 py-2">Kode Seri</th>
                                                     <th className="px-4 py-2">Jenis Gas</th>
                                                     <th className="px-4 py-2">Ukuran</th>
+                                                    <th className="px-4 py-2">Dipegang Sejak</th>
                                                     <th className="px-4 py-2">Status</th>
                                                 </tr>
                                             </thead>
@@ -551,6 +570,18 @@ const MembersView: React.FC<MembersViewProps> = ({
                                                         <td className="px-4 py-2 font-mono font-bold text-gray-700">{c.serialCode}</td>
                                                         <td className="px-4 py-2">{c.gasType}</td>
                                                         <td className="px-4 py-2">{c.size}</td>
+                                                        {/* Tabung yang tidak tercatat tanggalnya di buku opname dibiarkan kosong,
+                                                            bukan diisi tanggal karangan. */}
+                                                        <td className="px-4 py-2">
+                                                            {c.heldSince ? (
+                                                                <span className="whitespace-nowrap">
+                                                                    {formatTanggal(c.heldSince, { day: 'numeric', month: 'short', year: 'numeric' })}
+                                                                    <span className="text-xs text-gray-400 ml-1">({lamaDipegang(c.heldSince)})</span>
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-gray-300">&mdash;</span>
+                                                            )}
+                                                        </td>
                                                         <td className="px-4 py-2"><span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{labelStatusTabung(c.status)}</span></td>
                                                     </tr>
                                                 ))}

@@ -81,6 +81,12 @@ export interface Cylinder {
   status: CylinderStatus;
   currentHolder?: string; // Member ID or 'RefillStation'
   lastLocation: string;
+  /**
+   * Tanggal (YYYY-MM-DD) tabung mulai dipegang pemegangnya sekarang, bukan riwayat
+   * perpindahan -- terisi saat tabung keluar ke pelanggan, kosong lagi saat kembali
+   * ke gudang. Isian awalnya dari kolom tanggal di buku opname.
+   */
+  heldSince?: string | null;
 }
 
 export interface Member {
