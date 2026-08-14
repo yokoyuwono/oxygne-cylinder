@@ -1063,6 +1063,7 @@ const App: React.FC = () => {
               cylinders={cylinders}
               stations={refillStations}
               refillPrices={refillPrices}
+              transactions={transactions}
               onUpdateRefillPrices={handleUpdateRefillPrices}
               drafts={refillDrafts}
               onSaveDraft={handleSaveRefillDraft}
