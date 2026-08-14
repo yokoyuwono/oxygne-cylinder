@@ -134,6 +134,21 @@ export interface RefillPrice {
   serialCode?: string; // Vendor's code/SKU for this item
 }
 
+/**
+ * Pilihan tabung yang belum jadi dikirim -- satu draf berjalan per vendor.
+ *
+ * Isinya niat, bukan kejadian: selama masih draf, status tabung belum berubah dan
+ * belum ada baris transactions sama sekali. Isi cylinderIds bisa memuat tabung yang
+ * sudah tidak layak kirim lagi (keburu disewa orang, dikirim petugas lain), jadi
+ * selalu disaring ulang terhadap keadaan terkini saat dimuat.
+ */
+export interface RefillDraft {
+  stationId: string;
+  cylinderIds: string[];
+  updatedAt: string;
+  updatedBy?: string;
+}
+
 export interface Transaction {
   id: string;
   cylinderId?: string; // Optional for DEBT_PAYMENT

@@ -16,7 +16,7 @@ import HistoryView from './components/HistoryView';
 import MasterDataView from './components/MasterDataView';
 import GasExchangeView, { GasExchangePayload } from './components/GasExchangeView';
 import { NewRentalPayload } from './components/NewRentalForm';
-import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff } from './types';
+import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff } from './types';
 import { bolehKelolaPengguna } from './lib/peran';
 import KasView, { KasPayload } from './components/KasView';
 import BonView, { BayarBonPayload, TambahBonPayload } from './components/BonView';
@@ -85,6 +85,7 @@ const App: React.FC = () => {
   const [gasPrices, setGasPrices] = useState<GasPrice[]>([]);
   const [refillStations, setRefillStations] = useState<RefillStation[]>([]);
   const [refillPrices, setRefillPrices] = useState<RefillPrice[]>([]);
+  const [refillDrafts, setRefillDrafts] = useState<RefillDraft[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]); // For Admin View
   const [tariffs, setTariffs] = useState<RentalTariff[]>([]);
 
@@ -101,7 +102,8 @@ const App: React.FC = () => {
         rsData,
         rpData,
         prData,
-        rtData
+        rtData,
+        rdData
       ] = await Promise.all([
         fetchAllRecords<Cylinder>('cylinders'),
         fetchAllRecords<Member>('members'),
@@ -114,7 +116,9 @@ const App: React.FC = () => {
         fetchAllRecords<RefillStation>('refill_stations'),
         fetchAllRecords<RefillPrice>('refill_prices'),
         fetchAllRecords<BarisProfil>('profiles'),
-        fetchAllRecords<RentalTariff>('rental_tariffs')
+        fetchAllRecords<RentalTariff>('rental_tariffs'),
+        // Tanpa kolom `id` -- barisnya berkunci "stationId", satu draf per vendor.
+        fetchAllRecords<RefillDraft>('refill_drafts', '*', undefined, 'stationId')
       ]);
 
       if (cylData) setCylinders(cylData);
@@ -126,6 +130,7 @@ const App: React.FC = () => {
       if (rpData) setRefillPrices(rpData);
       if (prData) setUsers(prData.map(keAppUser));
       if (rtData) setTariffs(rtData);
+      if (rdData) setRefillDrafts(rdData);
 
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -418,6 +423,8 @@ const App: React.FC = () => {
     await supabase.from('refill_stations').delete().eq('id', id);
     setRefillStations(prev => prev.filter(s => s.id !== id));
     setRefillPrices(prev => prev.filter(p => p.stationId !== id));
+    // Barisnya sendiri sudah ikut terhapus di database lewat ON DELETE CASCADE.
+    setRefillDrafts(prev => prev.filter(d => d.stationId !== id));
   };
 
   const handleUpdateRefillPrices = async (newPrices: RefillPrice[]) => {
@@ -427,6 +434,47 @@ const App: React.FC = () => {
     // Better to refetch all to ensure full consistency and bypass pagination limits
     const data = await fetchAllRecords<RefillPrice>('refill_prices');
     if (data) setRefillPrices(data);
+  };
+
+  // -- Draf Pengiriman Isi Ulang --
+
+  /**
+   * Simpan pilihan tabung yang belum final -- satu draf per vendor, selalu ditimpa.
+   *
+   * Draf tidak menyentuh status tabung maupun transactions: yang tersimpan hanya
+   * daftar id pilihannya, supaya bisa dilanjutkan dari perangkat lain atau oleh
+   * petugas shift berikutnya. Barangnya baru benar-benar berpindah di
+   * handleSendToRefill.
+   *
+   * Kegagalannya dilempar, tidak ditelan seperti handler lain di berkas ini: petugas
+   * yang mengira pilihannya aman lalu menutup halaman kehilangan seluruh pekerjaannya,
+   * jadi RefillView harus bisa mengabarkan bahwa penyimpanan gagal.
+   */
+  const handleSaveRefillDraft = async (stationId: string, cylinderIds: string[]) => {
+    const draft: RefillDraft = {
+      stationId,
+      cylinderIds,
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser?.name
+    };
+
+    const { error } = await supabase.from('refill_drafts').upsert(draft);
+    if (error) {
+      console.error('Gagal menyimpan draf pengiriman:', error);
+      throw error;
+    }
+
+    setRefillDrafts(prev => [...prev.filter(d => d.stationId !== stationId), draft]);
+  };
+
+  const handleDeleteRefillDraft = async (stationId: string) => {
+    const { error } = await supabase.from('refill_drafts').delete().eq('stationId', stationId);
+    if (error) {
+      console.error('Gagal menghapus draf pengiriman:', error);
+      throw error;
+    }
+
+    setRefillDrafts(prev => prev.filter(d => d.stationId !== stationId));
   };
 
   // -- Refill Flow Handlers --
@@ -467,6 +515,18 @@ const App: React.FC = () => {
       return c;
     }));
     setTransactions(prev => [...prev, ...newTransactions]);
+
+    // Draf vendor ini sudah terwujud jadi pengiriman, jadi tidak ada lagi yang perlu
+    // dilanjutkan. Kalau penghapusannya gagal pun pengiriman tetap sah dan tercatat:
+    // draf yang tertinggal hanya memuat tabung yang kini berstatus 'Sedang Diisi',
+    // dan RefillView memang menyaring isi draf terhadap tabung yang masih layak kirim.
+    if (refillDrafts.some(d => d.stationId === stationId)) {
+      try {
+        await handleDeleteRefillDraft(stationId);
+      } catch {
+        // sudah dicatat ke console oleh handler-nya
+      }
+    }
   };
 
   const handleReceiveFromRefill = async (cylinderIds: string[], totalCost: number) => {
@@ -1004,6 +1064,10 @@ const App: React.FC = () => {
               stations={refillStations}
               refillPrices={refillPrices}
               onUpdateRefillPrices={handleUpdateRefillPrices}
+              drafts={refillDrafts}
+              onSaveDraft={handleSaveRefillDraft}
+              onDeleteDraft={handleDeleteRefillDraft}
+              currentUserName={currentUser?.name}
               onSendToRefill={handleSendToRefill}
               onReceiveFromRefill={handleReceiveFromRefill}
               onAddStation={handleAddStation}

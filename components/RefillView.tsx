@@ -1,11 +1,15 @@
 ﻿import React, { useState, useMemo } from 'react';
-import { Cylinder, CylinderStatus, RefillStation, GasType, RefillPrice, CylinderSize } from '../types';
+import { Cylinder, CylinderStatus, RefillStation, GasType, RefillPrice, RefillDraft, CylinderSize } from '../types';
 
 interface RefillViewProps {
     cylinders: Cylinder[];
     stations: RefillStation[];
     refillPrices: RefillPrice[];
+    drafts: RefillDraft[];
+    currentUserName?: string;
     onUpdateRefillPrices: (prices: RefillPrice[]) => void;
+    onSaveDraft: (stationId: string, cylinderIds: string[]) => Promise<void>;
+    onDeleteDraft: (stationId: string) => Promise<void>;
     onSendToRefill: (stationId: string, cylinderIds: string[]) => void;
     onReceiveFromRefill: (cylinderIds: string[], totalCost: number) => void;
     onAddStation: (station: RefillStation) => void;
@@ -17,7 +21,11 @@ const RefillView: React.FC<RefillViewProps> = ({
     cylinders,
     stations,
     refillPrices,
+    drafts,
+    currentUserName,
     onUpdateRefillPrices,
+    onSaveDraft,
+    onDeleteDraft,
     onSendToRefill,
     onReceiveFromRefill,
     onAddStation,
@@ -27,9 +35,13 @@ const RefillView: React.FC<RefillViewProps> = ({
     const [activeTab, setActiveTab] = useState<'dispatch' | 'restock' | 'stations'>('dispatch');
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [selectedStationId, setSelectedStationId] = useState<string>('');
+    const [cariTabung, setCariTabung] = useState('');
     const [restockCost, setRestockCost] = useState<string>('');
 
-    const [feedback, setFeedback] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
+    const [feedback, setFeedback] = useState<{ msg: string, type: 'success' | 'error' | 'warning' } | null>(null);
+
+    const [sedangSimpanDraf, setSedangSimpanDraf] = useState(false);
+    const [konfirmasiHapusDraf, setKonfirmasiHapusDraf] = useState(false);
 
     const [isStationModalOpen, setIsStationModalOpen] = useState(false);
     const [currentStation, setCurrentStation] = useState<Partial<RefillStation>>({});
@@ -71,15 +83,114 @@ const RefillView: React.FC<RefillViewProps> = ({
     };
 
     // 2. Filter cylinders that this vendor can actually accept (based on defined prices)
+    //
+    // Menerima stationId, bukan membaca selectedStationId, supaya bisa dipanggil untuk
+    // vendor yang BARU saja dipilih -- saat memuat draf, state-nya belum sempat berubah.
+    const tabungCocokUntuk = (stationId: string) => {
+        const hargaVendor = refillPrices.filter(p => p.stationId === stationId);
+        return emptyCylinders.filter(c => !!getBestPriceMatch(c, hargaVendor));
+    };
+
     const vendorCompatibleCylinders = useMemo(() => {
         if (!selectedStationId) return [];
 
         return emptyCylinders.filter(c => !!getBestPriceMatch(c, vendorPrices));
     }, [emptyCylinders, vendorPrices, selectedStationId]);
 
-    const showFeedback = (msg: string, type: 'success' | 'error' = 'success') => {
+    // 3. Saring lagi dengan kata kunci petugas (kode seri, jenis gas, ukuran, lokasi)
+    const tabungTampil = useMemo(() => {
+        const kunci = cariTabung.trim().toLowerCase();
+        if (!kunci) return vendorCompatibleCylinders;
+
+        return vendorCompatibleCylinders.filter(c =>
+            [c.serialCode, c.gasType, c.size, c.lastLocation]
+                .some(nilai => (nilai || '').toLowerCase().includes(kunci))
+        );
+    }, [vendorCompatibleCylinders, cariTabung]);
+
+    const showFeedback = (msg: string, type: 'success' | 'error' | 'warning' = 'success') => {
         setFeedback({ msg, type });
         setTimeout(() => setFeedback(null), 3000);
+    };
+
+    // -- Draf Pengiriman --
+
+    const drafVendor = useMemo(
+        () => drafts.find(d => d.stationId === selectedStationId),
+        [drafts, selectedStationId]
+    );
+
+    /** Isi draf yang saat ini masih benar-benar layak dikirim. */
+    const idsDrafLayak = useMemo(() => {
+        if (!drafVendor) return [];
+        const layak = new Set(vendorCompatibleCylinders.map(c => c.id));
+        return drafVendor.cylinderIds.filter(id => layak.has(id));
+    }, [drafVendor, vendorCompatibleCylinders]);
+
+    /** Pilihan di layar sudah berbeda dari isi draf yang tersimpan. */
+    const adaPerubahanBelumTersimpan = useMemo(() => {
+        if (selectedIds.length !== idsDrafLayak.length) return true;
+        const tersimpan = new Set(idsDrafLayak);
+        return selectedIds.some(id => !tersimpan.has(id));
+    }, [selectedIds, idsDrafLayak]);
+
+    /**
+     * Kembalikan isi draf vendor ke centangan di layar.
+     *
+     * Draf adalah tebakan tentang masa depan, dan kenyataan bergerak di belakangnya:
+     * tabung yang dicentang kemarin bisa sudah disewa pelanggan atau dikirim petugas
+     * lain dari perangkat lain. Yang begitu dilewati -- tapi jumlahnya dikabarkan,
+     * karena draf yang diam-diam menyusut lebih mirip kerusakan daripada penyesuaian.
+     */
+    const muatDrafVendor = (stationId: string, kabari: boolean) => {
+        const draf = drafts.find(d => d.stationId === stationId);
+        if (!stationId || !draf) {
+            setSelectedIds([]);
+            return;
+        }
+
+        const layak = new Set(tabungCocokUntuk(stationId).map(c => c.id));
+        const dipulihkan = draf.cylinderIds.filter(id => layak.has(id));
+        const gugur = draf.cylinderIds.length - dipulihkan.length;
+
+        setSelectedIds(dipulihkan);
+
+        if (!kabari) return;
+        if (gugur > 0) {
+            showFeedback(
+                `Draf dimuat: ${dipulihkan.length} tabung. ${gugur} tabung sudah tidak tersedia dan dilewati.`,
+                'warning'
+            );
+        } else {
+            showFeedback(`Draf dimuat: ${dipulihkan.length} tabung dipilih.`);
+        }
+    };
+
+    const handleSaveDraft = async () => {
+        if (!selectedStationId || selectedIds.length === 0) return;
+
+        setSedangSimpanDraf(true);
+        try {
+            await onSaveDraft(selectedStationId, selectedIds);
+            showFeedback(`Draf disimpan: ${selectedIds.length} tabung. Bisa dilanjutkan nanti.`);
+        } catch {
+            showFeedback('Draf gagal disimpan. Periksa koneksi lalu coba lagi.', 'error');
+        } finally {
+            setSedangSimpanDraf(false);
+        }
+    };
+
+    const confirmDeleteDraft = async () => {
+        if (!selectedStationId) return;
+
+        try {
+            await onDeleteDraft(selectedStationId);
+            setSelectedIds([]);
+            showFeedback('Draf dihapus.');
+        } catch {
+            showFeedback('Draf gagal dihapus. Coba lagi.', 'error');
+        }
+        setKonfirmasiHapusDraf(false);
     };
 
     const formatIDR = (val: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(val);
@@ -92,11 +203,18 @@ const RefillView: React.FC<RefillViewProps> = ({
         }
     };
 
+    /** Semua tabung pada daftar yang sedang tampil sudah tercentang. */
+    const semuaTerpilih = (list: Cylinder[]) =>
+        list.length > 0 && list.every(c => selectedIds.includes(c.id));
+
+    // Saat daftar sedang disaring, tombol ini hanya mengurus tabung yang tampak
+    // agar pilihan di luar hasil pencarian tidak ikut terhapus.
     const handleSelectAll = (list: Cylinder[]) => {
-        if (selectedIds.length === list.length) {
-            setSelectedIds([]);
+        const ids = list.map(c => c.id);
+        if (semuaTerpilih(list)) {
+            setSelectedIds(selectedIds.filter(id => !ids.includes(id)));
         } else {
-            setSelectedIds(list.map(c => c.id));
+            setSelectedIds([...selectedIds, ...ids.filter(id => !selectedIds.includes(id))]);
         }
     };
 
@@ -279,8 +397,13 @@ const RefillView: React.FC<RefillViewProps> = ({
     return (
         <div className="space-y-6 relative animate-fade-in-up pb-32 lg:pb-0">
             {feedback && (
-                <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg z-50 flex items-center gap-2 ${feedback.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
-                    <span className="material-icons text-lg">{feedback.type === 'success' ? 'check_circle' : 'error'}</span>
+                <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg z-50 flex items-center gap-2 max-w-[92vw] ${feedback.type === 'success' ? 'bg-green-600 text-white'
+                    : feedback.type === 'warning' ? 'bg-amber-500 text-white'
+                        : 'bg-red-600 text-white'
+                    }`}>
+                    <span className="material-icons text-lg">
+                        {feedback.type === 'success' ? 'check_circle' : feedback.type === 'warning' ? 'warning' : 'error'}
+                    </span>
                     <span className="font-medium text-sm">{feedback.msg}</span>
                 </div>
             )}
@@ -302,7 +425,14 @@ const RefillView: React.FC<RefillViewProps> = ({
                 ].map(tab => (
                     <button
                         key={tab.id}
-                        onClick={() => { setActiveTab(tab.id as any); setSelectedIds([]); }}
+                        onClick={() => {
+                            setActiveTab(tab.id as any);
+                            setCariTabung('');
+                            // Pilihan dipakai bersama oleh ketiga tab, jadi harus dikosongkan
+                            // saat berpindah. Kembali ke Pengiriman berarti kembali ke draf.
+                            if (tab.id === 'dispatch') muatDrafVendor(selectedStationId, false);
+                            else setSelectedIds([]);
+                        }}
                         className={`pb-4 px-2 text-sm font-medium transition-all relative flex items-center gap-2 whitespace-nowrap ${activeTab === tab.id
                             ? 'text-indigo-600'
                             : 'text-gray-500 hover:text-gray-700'
@@ -329,7 +459,11 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     <span className="material-icons absolute left-3 top-3 text-gray-400">store</span>
                                     <select
                                         value={selectedStationId}
-                                        onChange={(e) => { setSelectedStationId(e.target.value); setSelectedIds([]); }}
+                                        onChange={(e) => {
+                                            setSelectedStationId(e.target.value);
+                                            setCariTabung('');
+                                            muatDrafVendor(e.target.value, true);
+                                        }}
                                         className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white appearance-none"
                                     >
                                         <option value="">-- Pilih Stasiun Isi Ulang --</option>
@@ -360,22 +494,49 @@ const RefillView: React.FC<RefillViewProps> = ({
                         <div className="flex flex-col lg:flex-row gap-6">
                             <div className="flex-1 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col min-h-[500px]">
                                 {/* List Header */}
-                                <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center justify-between sticky top-0 z-10">
-                                    <div>
-                                        <h3 className="font-bold text-gray-800 text-sm">2. Pilih Tabung untuk Diisi Ulang</h3>
-                                        <p className="text-xs text-gray-500">Hanya menampilkan tabung yang cocok dengan {stations.find(s => s.id === selectedStationId)?.name}</p>
+                                <div className="p-4 bg-gray-50 border-b border-gray-100 sticky top-0 z-10 space-y-3">
+                                    <div className="flex items-center justify-between gap-4">
+                                        <div>
+                                            <h3 className="font-bold text-gray-800 text-sm">2. Pilih Tabung untuk Diisi Ulang</h3>
+                                            <p className="text-xs text-gray-500">Hanya menampilkan tabung yang cocok dengan {stations.find(s => s.id === selectedStationId)?.name}</p>
+                                        </div>
+                                        <button
+                                            onClick={() => handleSelectAll(tabungTampil)}
+                                            className="text-sm text-indigo-600 font-medium hover:underline bg-white px-3 py-1 rounded border border-gray-200 whitespace-nowrap"
+                                        >
+                                            {semuaTerpilih(tabungTampil) ? 'Batal Pilih Semua' : 'Pilih Semua'}
+                                        </button>
                                     </div>
-                                    <button
-                                        onClick={() => handleSelectAll(vendorCompatibleCylinders)}
-                                        className="text-sm text-indigo-600 font-medium hover:underline bg-white px-3 py-1 rounded border border-gray-200"
-                                    >
-                                        {selectedIds.length === vendorCompatibleCylinders.length && vendorCompatibleCylinders.length > 0 ? 'Batal Pilih Semua' : 'Pilih Semua'}
-                                    </button>
+
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                                        <div className="relative flex-1">
+                                            <span className="material-icons absolute left-3 top-2.5 text-gray-400 text-sm">search</span>
+                                            <input
+                                                type="text"
+                                                value={cariTabung}
+                                                onChange={(e) => setCariTabung(e.target.value)}
+                                                placeholder="Cari kode seri, jenis gas, ukuran, atau lokasi..."
+                                                className="w-full bg-white border border-gray-300 rounded-lg pl-9 pr-9 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                            />
+                                            {cariTabung && (
+                                                <button
+                                                    onClick={() => setCariTabung('')}
+                                                    className="absolute right-2 top-2 text-gray-400 hover:text-gray-600"
+                                                    aria-label="Bersihkan pencarian"
+                                                >
+                                                    <span className="material-icons text-base">close</span>
+                                                </button>
+                                            )}
+                                        </div>
+                                        <p className="text-xs text-gray-500 whitespace-nowrap">
+                                            {tabungTampil.length} dari {vendorCompatibleCylinders.length} tabung
+                                        </p>
+                                    </div>
                                 </div>
 
                                 {/* Filtered List */}
                                 <div className="flex-1 overflow-y-auto max-h-[600px]">
-                                    {vendorCompatibleCylinders.length > 0 ? (
+                                    {tabungTampil.length > 0 ? (
                                         <>
                                             {/* Desktop Table */}
                                             <div className="hidden lg:block">
@@ -390,7 +551,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y divide-gray-50">
-                                                        {vendorCompatibleCylinders.map(c => {
+                                                        {tabungTampil.map(c => {
                                                             const priceConfig = getBestPriceMatch(c, vendorPrices);
                                                             const displaySku = priceConfig?.serialCode || c.serialCode.split('-')[0];
 
@@ -428,13 +589,24 @@ const RefillView: React.FC<RefillViewProps> = ({
 
                                             {/* Mobile Card List */}
                                             <div className="lg:hidden p-4 bg-gray-50 space-y-3">
-                                                {vendorCompatibleCylinders.map(c => {
+                                                {tabungTampil.map(c => {
                                                     const priceConfig = getBestPriceMatch(c, vendorPrices);
                                                     const displaySku = priceConfig?.serialCode || c.serialCode.split('-')[0];
                                                     return renderCylinderCard(c, selectedIds.includes(c.id), displaySku, priceConfig?.price);
                                                 })}
                                             </div>
                                         </>
+                                    ) : vendorCompatibleCylinders.length > 0 ? (
+                                        <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                                            <span className="material-icons text-4xl mb-2 text-gray-300">search_off</span>
+                                            <p>Tidak ada tabung yang cocok dengan "{cariTabung}".</p>
+                                            <button
+                                                onClick={() => setCariTabung('')}
+                                                className="text-xs mt-2 text-indigo-600 font-medium hover:underline"
+                                            >
+                                                Bersihkan pencarian
+                                            </button>
+                                        </div>
                                     ) : (
                                         <div className="flex flex-col items-center justify-center h-64 text-gray-400">
                                             <span className="material-icons text-4xl mb-2 text-gray-300">block</span>
@@ -464,6 +636,60 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     <div className="border-t border-gray-100 pt-3 flex justify-between items-end">
                                         <span className="text-gray-500 text-sm">Perkiraan Biaya</span>
                                         <span className="font-bold text-xl text-indigo-600">{formatIDR(estimatedCost)}</span>
+                                    </div>
+                                </div>
+
+                                {/* Draf: pilihan yang belum final, boleh ditinggal dan dilanjutkan nanti */}
+                                <div className="mb-6 border-t border-gray-100 pt-4 space-y-3">
+                                    {drafVendor ? (
+                                        <div className={`rounded-lg p-3 border text-xs ${adaPerubahanBelumTersimpan
+                                            ? 'bg-amber-50 border-amber-200'
+                                            : 'bg-indigo-50 border-indigo-100'
+                                            }`}>
+                                            <div className="flex items-center gap-1.5 font-bold text-gray-700">
+                                                <span className={`material-icons text-sm ${adaPerubahanBelumTersimpan ? 'text-amber-600' : 'text-indigo-600'}`}>
+                                                    {adaPerubahanBelumTersimpan ? 'edit_note' : 'bookmark'}
+                                                </span>
+                                                Draf tersimpan: {idsDrafLayak.length} tabung
+                                            </div>
+                                            <p className="text-gray-500 mt-1 leading-relaxed">
+                                                {drafVendor.updatedBy ? `Oleh ${drafVendor.updatedBy} • ` : ''}
+                                                {new Date(drafVendor.updatedAt).toLocaleString('id-ID', {
+                                                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                                                })}
+                                            </p>
+                                            {adaPerubahanBelumTersimpan && (
+                                                <p className="text-amber-700 font-medium mt-1.5">
+                                                    Pilihan di layar berbeda dari draf. Simpan supaya tidak hilang.
+                                                </p>
+                                            )}
+                                        </div>
+                                    ) : selectedIds.length > 0 && (
+                                        <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg p-3 leading-relaxed">
+                                            Belum final? Simpan dulu sebagai draf — pilihan ini bisa dilanjutkan nanti,
+                                            juga dari perangkat lain.
+                                        </p>
+                                    )}
+
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={handleSaveDraft}
+                                            disabled={selectedIds.length === 0 || !adaPerubahanBelumTersimpan || sedangSimpanDraf}
+                                            className="flex-1 py-2.5 border border-indigo-200 bg-white hover:bg-indigo-50 disabled:bg-gray-50 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed text-indigo-700 rounded-lg text-sm font-bold transition-all flex justify-center items-center gap-2"
+                                        >
+                                            <span className="material-icons text-sm">{sedangSimpanDraf ? 'hourglass_empty' : 'save'}</span>
+                                            {sedangSimpanDraf ? 'Menyimpan...' : 'Simpan Draf'}
+                                        </button>
+
+                                        {drafVendor && (
+                                            <button
+                                                onClick={() => setKonfirmasiHapusDraf(true)}
+                                                className="px-3 py-2.5 text-gray-400 hover:text-red-600 hover:bg-red-50 border border-gray-200 rounded-lg transition-colors"
+                                                title="Hapus draf"
+                                            >
+                                                <span className="material-icons text-sm">delete_outline</span>
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
 
@@ -505,7 +731,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                 </div>
                             </div>
                             <button onClick={() => handleSelectAll(refillingCylinders)} className="text-sm text-indigo-600 font-medium hover:underline">
-                                {selectedIds.length === refillingCylinders.length && refillingCylinders.length > 0 ? 'Batal Pilih Semua' : 'Pilih Semua'}
+                                {semuaTerpilih(refillingCylinders) ? 'Batal Pilih Semua' : 'Pilih Semua'}
                             </button>
                         </div>
 
@@ -803,6 +1029,46 @@ const RefillView: React.FC<RefillViewProps> = ({
                                 >
                                     <span>Pengiriman</span>
                                     <span className="material-icons text-sm">arrow_forward</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* DRAFT DELETE MODAL */}
+            {konfirmasiHapusDraf && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 overflow-hidden">
+                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
+                            <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                                <span className="material-icons text-gray-400">bookmark_remove</span>
+                                Hapus Draf
+                            </h3>
+                            <button onClick={() => setKonfirmasiHapusDraf(false)} className="text-gray-400 hover:text-gray-600">
+                                <span className="material-icons">close</span>
+                            </button>
+                        </div>
+                        <div className="p-6">
+                            <p className="text-gray-600 text-sm leading-relaxed mb-2">
+                                Draf untuk <strong>{stations.find(s => s.id === selectedStationId)?.name}</strong> berisi{' '}
+                                <strong>{idsDrafLayak.length} tabung</strong> akan dibuang, dan centangan di layar ikut dikosongkan.
+                            </p>
+                            <p className="text-gray-400 text-xs mb-6">
+                                Tidak ada tabung yang berpindah — draf memang belum pernah jadi pengiriman.
+                            </p>
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    onClick={() => setKonfirmasiHapusDraf(false)}
+                                    className="flex-1 py-2.5 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
+                                >
+                                    Batal
+                                </button>
+                                <button
+                                    onClick={confirmDeleteDraft}
+                                    className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-bold shadow-md shadow-red-100 transition-colors"
+                                >
+                                    Ya, Hapus Draf
                                 </button>
                             </div>
                         </div>

@@ -28,7 +28,18 @@ export async function fetchAllRecords<T>(
      * dari satu tempat -- menyaringnya di tiap komponen menyisakan risiko satu
      * tempat terlewat, dan angkanya lalu salah tanpa error apa pun.
      */
-    saring?: (q: any) => any
+    saring?: (q: any) => any,
+    /**
+     * Kolom pengurut, sekaligus penentu batas antar halaman.
+     *
+     * Wajib stabil dan unik, karena .range() memotong hasil berdasar urutan ini --
+     * urutan yang goyah membuat baris terlewat atau terambil dua kali. Hampir semua
+     * tabel di sini memakai `id`, tapi tidak semua punya: refill_drafts berkunci
+     * "stationId". Sebelum parameter ini ada, tabel begitu membalas 42703 dan --
+     * karena seluruh pemuatan awal satu Promise.all -- menjatuhkan SEMUA data
+     * aplikasi, bukan cuma tabelnya sendiri.
+     */
+    kolomUrut = 'id'
 ): Promise<T[]> {
     let allData: T[] = [];
     let from = 0;
@@ -41,7 +52,7 @@ export async function fetchAllRecords<T>(
 
         const { data, error } = await q
             .range(from, from + step - 1)
-            .order('id' as any, { ascending: true });
+            .order(kolomUrut as any, { ascending: true });
 
         if (error) {
             console.error(`Error fetching from ${tableName}:`, error);
