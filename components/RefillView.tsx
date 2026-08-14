@@ -1,10 +1,13 @@
 ﻿import React, { useState, useMemo } from 'react';
-import { Cylinder, CylinderStatus, RefillStation, GasType, RefillPrice, RefillDraft, CylinderSize } from '../types';
+import { Cylinder, CylinderStatus, RefillStation, GasType, RefillPrice, RefillDraft, CylinderSize, Transaction } from '../types';
+import { urutkanTabung } from '../lib/urutanTabung';
+import RefillHistory from './RefillHistory';
 
 interface RefillViewProps {
     cylinders: Cylinder[];
     stations: RefillStation[];
     refillPrices: RefillPrice[];
+    transactions: Transaction[];
     drafts: RefillDraft[];
     currentUserName?: string;
     onUpdateRefillPrices: (prices: RefillPrice[]) => void;
@@ -21,6 +24,7 @@ const RefillView: React.FC<RefillViewProps> = ({
     cylinders,
     stations,
     refillPrices,
+    transactions,
     drafts,
     currentUserName,
     onUpdateRefillPrices,
@@ -32,7 +36,7 @@ const RefillView: React.FC<RefillViewProps> = ({
     onUpdateStation,
     onDeleteStation
 }) => {
-    const [activeTab, setActiveTab] = useState<'dispatch' | 'restock' | 'stations'>('dispatch');
+    const [activeTab, setActiveTab] = useState<'dispatch' | 'restock' | 'stations' | 'history'>('dispatch');
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [selectedStationId, setSelectedStationId] = useState<string>('');
     const [cariTabung, setCariTabung] = useState('');
@@ -53,8 +57,17 @@ const RefillView: React.FC<RefillViewProps> = ({
     const [editingPrices, setEditingPrices] = useState<RefillPrice[]>([]);
 
     // -- Derived Data --
-    const emptyCylinders = useMemo(() => cylinders.filter(c => c.status === CylinderStatus.EmptyRefill), [cylinders]);
-    const refillingCylinders = useMemo(() => cylinders.filter(c => c.status === CylinderStatus.Refilling), [cylinders]);
+    //
+    // Diurut di sini, di sumbernya. Seluruh daftar tabung di halaman ini turunan dari
+    // dua array ini lewat .filter(), dan filter mempertahankan urutan -- jadi satu
+    // pengurutan di sini membuat tab Pengiriman dan Terima Kembali seragam tanpa perlu
+    // mengingat mengurutkan ulang di tiap tempat yang menyaringnya.
+    const emptyCylinders = useMemo(
+        () => urutkanTabung(cylinders.filter(c => c.status === CylinderStatus.EmptyRefill)),
+        [cylinders]);
+    const refillingCylinders = useMemo(
+        () => urutkanTabung(cylinders.filter(c => c.status === CylinderStatus.Refilling)),
+        [cylinders]);
 
     // -- Dispatch Logic --
     // 1. Get prices for selected vendor
@@ -421,7 +434,8 @@ const RefillView: React.FC<RefillViewProps> = ({
                 {[
                     { id: 'dispatch', label: 'Pengiriman', icon: 'local_shipping' },
                     { id: 'restock', label: 'Terima Kembali', icon: 'inventory_2' },
-                    { id: 'stations', label: 'Vendor', icon: 'store' }
+                    { id: 'stations', label: 'Vendor', icon: 'store' },
+                    { id: 'history', label: 'Riwayat', icon: 'history' }
                 ].map(tab => (
                     <button
                         key={tab.id}
@@ -956,6 +970,15 @@ const RefillView: React.FC<RefillViewProps> = ({
                         ))}
                     </div>
                 </div>
+            )}
+
+            {/* TAB: HISTORY */}
+            {activeTab === 'history' && (
+                <RefillHistory
+                    transactions={transactions}
+                    cylinders={cylinders}
+                    stations={stations}
+                />
             )}
 
             {/* DISPATCH CONFIRMATION MODAL */}
