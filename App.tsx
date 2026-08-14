@@ -20,7 +20,8 @@ import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSiz
 import { bolehKelolaPengguna } from './lib/peran';
 import KasView, { KasPayload } from './components/KasView';
 import BonView, { BayarBonPayload, TambahBonPayload } from './components/BonView';
-import { supabase, isSupabaseConfigured, fetchAllRecords } from './lib/supabase';
+import { supabase, isSupabaseConfigured, fetchAllRecords, pesanErrorSupabase } from './lib/supabase';
+import PeringatanDataGagal, { DataGagal } from './components/PeringatanDataGagal';
 
 /**
  * Baris tabel profiles apa adanya.
@@ -36,6 +37,21 @@ interface BarisProfil {
   role: string | null;
   lastLogin?: string | null;
 }
+
+/**
+ * Satu tabel beserta cara memasangnya ke state, dibungkus jadi satu tugas berdiri
+ * sendiri.
+ *
+ * Dulu semua tabel diambil dengan satu Promise.all dan setState-nya baru jalan
+ * setelah semuanya beres, jadi satu tabel yang gagal membuat SELURUH aplikasi
+ * tampil kosong -- daftar pelanggan dan tabung ikut hilang padahal fetch-nya
+ * sukses. Dengan bentuk ini tiap tabel memasang datanya sendiri begitu tiba, dan
+ * yang gagal cuma menjatuhkan dirinya sendiri.
+ */
+const muat = <T,>(label: string, ambil: () => Promise<T>, pasang: (data: T) => void) => ({
+  label,
+  jalankan: async () => { pasang(await ambil()); },
+});
 
 const keAppUser = (baris: BarisProfil): AppUser => ({
   id: baris.id,
@@ -88,48 +104,42 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<AppUser[]>([]); // For Admin View
   const [tariffs, setTariffs] = useState<RentalTariff[]>([]);
 
+  /** Data yang tidak berhasil dimuat pada pengambilan terakhir; kosong kalau semua sukses. */
+  const [dataGagal, setDataGagal] = useState<DataGagal[]>([]);
+
   // -- 1. FETCH INITIAL DATA --
   const fetchData = async () => {
-    try {
-      // Fetch all records from all tables concurrently using the paginated helper
-      const [
-        cylData,
-        memData,
-        txData,
-        mpData,
-        gpData,
-        rsData,
-        rpData,
-        prData,
-        rtData
-      ] = await Promise.all([
-        fetchAllRecords<Cylinder>('cylinders'),
-        fetchAllRecords<Member>('members'),
-        // Transaksi yang dibatalkan disaring di sini, satu-satunya pintu masuk data.
-        // Stok, barang di tangan pelanggan, dan seluruh laporan diturunkan dari array
-        // ini, jadi menyaringnya sekali membuat semuanya ikut benar.
-        fetchAllRecords<Transaction>('transactions', '*', q => q.is('voidedAt', null)),
-        fetchAllRecords<MemberPrice>('member_prices'),
-        fetchAllRecords<GasPrice>('refill_prices'),
-        fetchAllRecords<RefillStation>('refill_stations'),
-        fetchAllRecords<RefillPrice>('refill_prices'),
-        fetchAllRecords<BarisProfil>('profiles'),
-        fetchAllRecords<RentalTariff>('rental_tariffs')
-      ]);
+    // Semua tabel tetap diambil berbarengan, tapi tiap tabel dinilai sendiri-sendiri.
+    // Label memakai istilah yang dikenal petugas, karena inilah yang muncul di
+    // peringatan kalau tabelnya gagal.
+    const muatan = [
+      muat('Tabung', () => fetchAllRecords<Cylinder>('cylinders'), setCylinders),
+      muat('Pelanggan', () => fetchAllRecords<Member>('members'), setMembers),
+      // Transaksi yang dibatalkan disaring di sini, satu-satunya pintu masuk data.
+      // Stok, barang di tangan pelanggan, dan seluruh laporan diturunkan dari array
+      // ini, jadi menyaringnya sekali membuat semuanya ikut benar.
+      muat('Transaksi', () => fetchAllRecords<Transaction>('transactions', '*', q => q.is('voidedAt', null)), setTransactions),
+      muat('Harga khusus pelanggan', () => fetchAllRecords<MemberPrice>('member_prices'), setMemberPrices),
+      muat('Harga gas', () => fetchAllRecords<GasPrice>('refill_prices'), setGasPrices),
+      muat('Pabrik isi ulang', () => fetchAllRecords<RefillStation>('refill_stations'), setRefillStations),
+      muat('Harga isi ulang', () => fetchAllRecords<RefillPrice>('refill_prices'), setRefillPrices),
+      muat('Pengguna', () => fetchAllRecords<BarisProfil>('profiles'), baris => setUsers(baris.map(keAppUser))),
+      muat('Tarif sewa', () => fetchAllRecords<RentalTariff>('rental_tariffs'), setTariffs),
+    ];
 
-      if (cylData) setCylinders(cylData);
-      if (memData) setMembers(memData);
-      if (txData) setTransactions(txData);
-      if (mpData) setMemberPrices(mpData);
-      if (gpData) setGasPrices(gpData);
-      if (rsData) setRefillStations(rsData);
-      if (rpData) setRefillPrices(rpData);
-      if (prData) setUsers(prData.map(keAppUser));
-      if (rtData) setTariffs(rtData);
+    const hasil = await Promise.allSettled(muatan.map(m => m.jalankan()));
 
-    } catch (error) {
-      console.error("Error fetching data:", error);
-    }
+    const gagal = hasil.flatMap((h, i) =>
+      h.status === 'rejected'
+        ? [{ label: muatan[i].label, pesan: pesanErrorSupabase(h.reason) }]
+        : []
+    );
+
+    gagal.forEach(g => console.error(`Gagal memuat ${g.label}:`, g.pesan));
+
+    // Selalu di-set, termasuk saat kosong: pengambilan ulang yang berhasil harus
+    // menghapus peringatan lama, bukan membiarkannya menempel selamanya.
+    setDataGagal(gagal);
   };
 
   // Check active session on mount
@@ -196,6 +206,7 @@ const App: React.FC = () => {
     setCylinders([]);
     setMembers([]);
     setTransactions([]);
+    setDataGagal([]);
   };
 
   // -- User CRUD Handlers (Admin Only) --
@@ -930,6 +941,9 @@ const App: React.FC = () => {
   return (
     <HashRouter>
       <Layout currentUser={currentUser} onLogout={handleLogout}>
+        {/* Di atas isi halaman, bukan di satu halaman saja: data yang hilang ikut
+            memengaruhi angka di halaman mana pun yang sedang dibuka. */}
+        <PeringatanDataGagal gagal={dataGagal} onMuatUlang={fetchData} />
         <Routes>
           <Route path="/" element={
             <Dashboard

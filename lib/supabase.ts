@@ -16,6 +16,22 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 export const isSupabaseConfigured = !!supabaseUrl && !!supabaseKey && supabaseUrl !== 'https://placeholder.supabase.co';
 
 /**
+ * Pesan yang masih bisa dibaca orang dari error apa pun yang keluar dari Supabase.
+ *
+ * PostgrestError bukan Error biasa -- ia objek polos {message, code, details},
+ * jadi `String(e)` di atasnya cuma menghasilkan "[object Object]". Kodenya ikut
+ * dibawa karena itu yang paling menolong saat melapor (mis. 42703 = kolom tidak
+ * ada, artinya migration belum jalan di environment ini).
+ */
+export function pesanErrorSupabase(e: unknown): string {
+    if (e && typeof e === 'object') {
+        const err = e as { message?: string; code?: string };
+        if (err.message) return err.code ? `${err.message} (kode ${err.code})` : err.message;
+    }
+    return String(e);
+}
+
+/**
  * Helper to fetch ALL records from a table, bypassing the default 1000 row limit
  * by automatically paginating through all available records.
  */
