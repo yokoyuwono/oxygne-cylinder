@@ -46,8 +46,30 @@
       }
     }
 
+    /*
+      Sengaja TANPA `forwards`.
+
+      Kelas ini dipasang di elemen akar hampir tiap halaman. Dengan fill-mode
+      `forwards`, hasil animasi menempel selamanya -- termasuk transform-nya. Nilai
+      akhirnya memang tak bergerak (translate3d nol), tapi "transform bernilai nol"
+      berbeda dari "tanpa transform": elemen ber-transform menjadi patokan baru bagi
+      seluruh keturunannya yang `position: fixed`, menggantikan layar.
+
+      Akibatnya setiap modal di aplikasi ini -- konfirmasi pengiriman, terima
+      kembali, hapus vendor, hapus draf -- dipusatkan ke tinggi penuh isi halaman,
+      bukan ke layar. Selama daftarnya pendek kebetulan masih kelihatan; begitu
+      isinya panjang, kartunya mendarat jauh di luar layar dan yang tersisa hanya
+      latar gelap: modal yang mustahil disetujui maupun ditutup.
+
+      Membuang transform dari bingkai akhir TIDAK menyembuhkan -- properti yang
+      muncul di salah satu bingkai tetap dianimasikan sepanjang timeline, dan
+      interpolasinya menuju `none` menghasilkan matriks identitas, bukan `none`.
+      Yang harus dilepas adalah penahannya. Tanpa `forwards`, begitu animasi
+      selesai elemen kembali ke gayanya sendiri -- opacity 1, transform none --
+      yang memang persis keadaan akhir animasinya, jadi geraknya tidak berubah.
+    */
     .animate-fade-in-up {
-      animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .animate-fade-in {
