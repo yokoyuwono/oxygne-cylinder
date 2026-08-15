@@ -1,5 +1,6 @@
 ﻿import React, { useState, useMemo } from 'react';
-import { Cylinder, CylinderStatus, RefillStation, GasType, RefillPrice, RefillDraft, CylinderSize, Transaction } from '../types';
+import { Cylinder, CylinderStatus, RefillStation, GasType, RefillPrice, RefillDraft, PenukaranTabung, CylinderSize, Transaction } from '../types';
+import { labelStatusTabung } from '../labels';
 import { urutkanTabung } from '../lib/urutanTabung';
 import RefillHistory from './RefillHistory';
 
@@ -14,7 +15,7 @@ interface RefillViewProps {
     onSaveDraft: (stationId: string, cylinderIds: string[]) => Promise<void>;
     onDeleteDraft: (stationId: string) => Promise<void>;
     onSendToRefill: (stationId: string, cylinderIds: string[]) => void;
-    onReceiveFromRefill: (cylinderIds: string[], totalCost: number) => void;
+    onReceiveFromRefill: (cylinderIds: string[], totalCost: number, penukaran: PenukaranTabung[]) => Promise<void>;
     onAddStation: (station: RefillStation) => void;
     onUpdateStation: (station: RefillStation) => void;
     onDeleteStation: (id: string) => void;
@@ -42,6 +43,19 @@ const RefillView: React.FC<RefillViewProps> = ({
     const [cariTabung, setCariTabung] = useState('');
     const [restockCost, setRestockCost] = useState<string>('');
 
+    // -- Tukar Tabung (tab Terima Kembali) --
+    //
+    // Pabrik kadang mengembalikan tabung yang berbeda dari yang dikirim. Penukarannya
+    // disusun dulu di sini bersama centangan tabung yang pulang normal, dan baru ditulis
+    // ke basis data sekali jalan saat penerimaan dikonfirmasi.
+    const [penukaran, setPenukaran] = useState<PenukaranTabung[]>([]);
+    const [tabungDitukar, setTabungDitukar] = useState<Cylinder | null>(null);
+    const [formTukar, setFormTukar] = useState<{ serialCode: string; gasType: GasType; size: CylinderSize }>({
+        serialCode: '',
+        gasType: GasType.Oxygen,
+        size: CylinderSize.Large
+    });
+
     const [feedback, setFeedback] = useState<{ msg: string, type: 'success' | 'error' | 'warning' } | null>(null);
 
     const [sedangSimpanDraf, setSedangSimpanDraf] = useState(false);
@@ -68,6 +82,24 @@ const RefillView: React.FC<RefillViewProps> = ({
     const refillingCylinders = useMemo(
         () => urutkanTabung(cylinders.filter(c => c.status === CylinderStatus.Refilling)),
         [cylinders]);
+
+    const petaPenukaran = useMemo(
+        () => new Map(penukaran.map(p => [p.lamaId, p])),
+        [penukaran]);
+
+    /** Tabung yang masih bisa dicentang sebagai "pulang apa adanya". */
+    const tabungKembaliNormal = useMemo(
+        () => refillingCylinders.filter(c => !petaPenukaran.has(c.id)),
+        [refillingCylinders, petaPenukaran]);
+
+    /** Kode seri pengganti pada sebuah penukaran, entah tabung baru atau yang sudah terdaftar. */
+    const seriPengganti = (p: PenukaranTabung) =>
+        p.pengganti?.serialCode
+        ?? cylinders.find(c => c.id === p.penggantiId)?.serialCode
+        ?? '-';
+
+    /** Tabung yang benar-benar masuk gudang: yang pulang sendiri ditambah penggantinya. */
+    const totalDiterima = selectedIds.length + penukaran.length;
 
     // -- Dispatch Logic --
     // 1. Get prices for selected vendor
@@ -261,15 +293,28 @@ const RefillView: React.FC<RefillViewProps> = ({
 
     const getRestockSummary = () => {
         const summaryMap: Record<string, { count: number, gas: string, size: string }> = {};
-        selectedIds.forEach(id => {
-            const cyl = cylinders.find(c => c.id === id);
-            if (!cyl) return;
-            const key = `${cyl.gasType}-${cyl.size}`;
+
+        const tambah = (gas?: string, size?: string) => {
+            if (!gas || !size) return;
+            const key = `${gas}-${size}`;
             if (!summaryMap[key]) {
-                summaryMap[key] = { count: 0, gas: cyl.gasType, size: cyl.size };
+                summaryMap[key] = { count: 0, gas, size };
             }
             summaryMap[key].count++;
+        };
+
+        selectedIds.forEach(id => {
+            const cyl = cylinders.find(c => c.id === id);
+            tambah(cyl?.gasType, cyl?.size);
         });
+
+        // Tabung pengganti ikut dihitung: yang masuk gudang adalah dia, bukan tabung
+        // lama yang jenis dan ukurannya belum tentu sama.
+        penukaran.forEach(p => {
+            const terdaftar = p.penggantiId ? cylinders.find(c => c.id === p.penggantiId) : undefined;
+            tambah(p.pengganti?.gasType ?? terdaftar?.gasType, p.pengganti?.size ?? terdaftar?.size);
+        });
+
         return Object.values(summaryMap);
     };
 
@@ -289,17 +334,101 @@ const RefillView: React.FC<RefillViewProps> = ({
     };
 
     const handleRestockClick = () => {
-        if (selectedIds.length === 0) return;
+        if (totalDiterima === 0) return;
         setIsRestockConfirmOpen(true);
     };
 
-    const confirmRestock = () => {
+    const confirmRestock = async () => {
         const cost = parseFloat(restockCost) || 0;
-        onReceiveFromRefill(selectedIds, cost);
-        setSelectedIds([]);
-        setRestockCost('');
-        setIsRestockConfirmOpen(false);
-        showFeedback("Penerimaan berhasil. Stok diperbarui.");
+
+        try {
+            await onReceiveFromRefill(selectedIds, cost, penukaran);
+            setSelectedIds([]);
+            setPenukaran([]);
+            setRestockCost('');
+            setIsRestockConfirmOpen(false);
+            showFeedback("Penerimaan berhasil. Stok diperbarui.");
+        } catch {
+            // Penyimpanan tabung pengganti gagal, jadi tidak ada yang berubah. Pilihan
+            // di layar sengaja dibiarkan utuh supaya petugas tinggal mencoba lagi.
+            setIsRestockConfirmOpen(false);
+            showFeedback('Penerimaan gagal disimpan. Periksa koneksi lalu coba lagi.', 'error');
+        }
+    };
+
+    // -- Tukar Tabung --
+
+    const kodeTukar = formTukar.serialCode.trim().toUpperCase();
+
+    /**
+     * Tabung yang kode serinya sama dengan yang sedang diketik.
+     *
+     * Seluruh tabung sudah ada di memori (App memuatnya lewat fetchAllRecords), jadi
+     * pemeriksaan ini tidak perlu menyentuh jaringan.
+     */
+    const tabungBerkodeSama = useMemo(
+        () => (kodeTukar ? cylinders.find(c => (c.serialCode || '').trim().toUpperCase() === kodeTukar) : undefined),
+        [cylinders, kodeTukar]);
+
+    /** Alasan kode seri yang diketik tidak bisa dipakai; null berarti aman. */
+    const masalahTukar = useMemo<string | null>(() => {
+        if (!tabungDitukar || !kodeTukar) return null;
+
+        if (tabungBerkodeSama?.id === tabungDitukar.id) {
+            return 'Ini kode tabung yang sedang ditukar. Isi kode tabung penggantinya.';
+        }
+
+        const dipakaiPenukaranLain = penukaran.some(p =>
+            p.lamaId !== tabungDitukar.id &&
+            (p.pengganti?.serialCode === kodeTukar || (!!tabungBerkodeSama && p.penggantiId === tabungBerkodeSama.id))
+        );
+        if (dipakaiPenukaranLain) {
+            return 'Kode ini sudah dipakai sebagai pengganti tabung lain di penerimaan ini.';
+        }
+
+        if (!tabungBerkodeSama) return null;
+
+        if (tabungBerkodeSama.status === CylinderStatus.Rented || tabungBerkodeSama.status === CylinderStatus.Delivery) {
+            return `Tabung ${kodeTukar} tercatat ${labelStatusTabung(tabungBerkodeSama.status).toLowerCase()} di tangan pelanggan. Periksa lagi kode serinya.`;
+        }
+        if (petaPenukaran.has(tabungBerkodeSama.id)) {
+            return 'Tabung ini justru sedang ditandai ditukar di penerimaan ini.';
+        }
+        if (selectedIds.includes(tabungBerkodeSama.id)) {
+            return 'Tabung ini sudah dicentang sebagai tabung yang pulang. Batalkan centangnya dulu.';
+        }
+
+        return null;
+    }, [tabungDitukar, kodeTukar, tabungBerkodeSama, penukaran, petaPenukaran, selectedIds]);
+
+    const bukaModalTukar = (c: Cylinder) => {
+        const entri = petaPenukaran.get(c.id);
+        const terdaftar = entri?.penggantiId ? cylinders.find(x => x.id === entri.penggantiId) : undefined;
+
+        setFormTukar({
+            serialCode: entri?.pengganti?.serialCode ?? terdaftar?.serialCode ?? '',
+            gasType: entri?.pengganti?.gasType ?? terdaftar?.gasType ?? c.gasType,
+            size: entri?.pengganti?.size ?? terdaftar?.size ?? c.size
+        });
+        setTabungDitukar(c);
+    };
+
+    const simpanPenukaran = () => {
+        if (!tabungDitukar || !kodeTukar || masalahTukar) return;
+
+        const entri: PenukaranTabung = tabungBerkodeSama
+            ? { lamaId: tabungDitukar.id, penggantiId: tabungBerkodeSama.id }
+            : { lamaId: tabungDitukar.id, pengganti: { serialCode: kodeTukar, gasType: formTukar.gasType, size: formTukar.size } };
+
+        setPenukaran(prev => [...prev.filter(p => p.lamaId !== entri.lamaId), entri]);
+        // Tabung yang ditukar tidak pulang, jadi ia tidak boleh ikut terhitung sebagai
+        // tabung yang diterima kembali.
+        setSelectedIds(prev => prev.filter(id => id !== tabungDitukar.id));
+        setTabungDitukar(null);
+    };
+
+    const batalPenukaran = (lamaId: string) => {
+        setPenukaran(prev => prev.filter(p => p.lamaId !== lamaId));
     };
 
     // Station Modal
@@ -371,41 +500,75 @@ const RefillView: React.FC<RefillViewProps> = ({
     // -- RENDER HELPERS --
 
     // Mobile Card Item
-    const renderCylinderCard = (c: Cylinder, isSelected: boolean, vendorSku?: string, price?: number) => (
-        <div
-            key={c.id}
-            onClick={() => toggleSelection(c.id)}
-            className={`p-4 rounded-xl border mb-3 flex items-center justify-between transition-all active:scale-[0.98] ${isSelected
-                ? 'bg-indigo-50 border-indigo-500 shadow-sm'
-                : 'bg-white border-gray-200 shadow-sm'
-                }`}
-        >
-            <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${isSelected ? 'bg-indigo-200 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>
-                    <span className="material-icons">{isSelected ? 'check' : 'propane'}</span>
+    //
+    // `tukar` hanya diisi di tab Terima Kembali. Tabung yang sudah ditandai ditukar tidak
+    // bisa dicentang lagi -- ia tidak pulang, jadi mencentangnya tidak punya arti.
+    const renderCylinderCard = (
+        c: Cylinder,
+        isSelected: boolean,
+        vendorSku?: string,
+        price?: number,
+        tukar?: { pengganti?: string; onTukar: () => void; onBatal: () => void }
+    ) => {
+        const ditukar = !!tukar?.pengganti;
+
+        return (
+            <div
+                key={c.id}
+                onClick={() => { if (!ditukar) toggleSelection(c.id); }}
+                className={`p-4 rounded-xl border mb-3 flex items-center justify-between transition-all active:scale-[0.98] ${ditukar
+                    ? 'bg-amber-50 border-amber-400 shadow-sm'
+                    : isSelected
+                        ? 'bg-indigo-50 border-indigo-500 shadow-sm'
+                        : 'bg-white border-gray-200 shadow-sm'
+                    }`}
+            >
+                <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${ditukar ? 'bg-amber-200 text-amber-700' : isSelected ? 'bg-indigo-200 text-indigo-700' : 'bg-gray-100 text-gray-500'}`}>
+                        <span className="material-icons">{ditukar ? 'swap_horiz' : isSelected ? 'check' : 'propane'}</span>
+                    </div>
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <span className="font-bold font-mono text-gray-900">{c.serialCode}</span>
+                            {vendorSku && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 rounded border border-indigo-200 font-mono">SKU: {vendorSku}</span>}
+                        </div>
+                        {ditukar ? (
+                            <div className="text-xs text-amber-700 mt-0.5">
+                                Ditukar dengan <span className="font-mono font-bold">{tukar!.pengganti}</span>
+                            </div>
+                        ) : (
+                            <div className="text-xs text-gray-500 flex gap-2 mt-0.5">
+                                <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{c.gasType}</span>
+                                <span className="border border-gray-200 px-1.5 py-0.5 rounded text-gray-500">{c.size}</span>
+                            </div>
+                        )}
+                    </div>
                 </div>
-                <div>
-                    <div className="flex items-center gap-2">
-                        <span className="font-bold font-mono text-gray-900">{c.serialCode}</span>
-                        {vendorSku && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 rounded border border-indigo-200 font-mono">SKU: {vendorSku}</span>}
-                    </div>
-                    <div className="text-xs text-gray-500 flex gap-2 mt-0.5">
-                        <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{c.gasType}</span>
-                        <span className="border border-gray-200 px-1.5 py-0.5 rounded text-gray-500">{c.size}</span>
-                    </div>
+                <div className="text-right">
+                    {price !== undefined && (
+                        <p className="font-bold text-gray-800 text-sm">{formatIDR(price)}</p>
+                    )}
+                    {tukar ? (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); ditukar ? tukar.onBatal() : tukar.onTukar(); }}
+                            className={`px-2 py-1 rounded-lg text-xs font-medium flex items-center gap-1 ${ditukar
+                                ? 'text-amber-700 bg-amber-100 hover:bg-amber-200'
+                                : 'text-gray-500 bg-gray-100 hover:bg-gray-200'
+                                }`}
+                        >
+                            <span className="material-icons text-[14px]">{ditukar ? 'undo' : 'swap_horiz'}</span>
+                            {ditukar ? 'Batal' : 'Tukar'}
+                        </button>
+                    ) : (
+                        <div className="text-xs text-gray-400 flex items-center gap-1 justify-end">
+                            <span className="material-icons text-[10px]">place</span>
+                            <span className="truncate max-w-[80px]">{c.lastLocation}</span>
+                        </div>
+                    )}
                 </div>
             </div>
-            <div className="text-right">
-                {price !== undefined && (
-                    <p className="font-bold text-gray-800 text-sm">{formatIDR(price)}</p>
-                )}
-                <div className="text-xs text-gray-400 flex items-center gap-1 justify-end">
-                    <span className="material-icons text-[10px]">place</span>
-                    <span className="truncate max-w-[80px]">{c.lastLocation}</span>
-                </div>
-            </div>
-        </div>
-    );
+        );
+    };
 
     return (
         <div className="space-y-6 relative animate-fade-in-up pb-32 lg:pb-0">
@@ -446,6 +609,9 @@ const RefillView: React.FC<RefillViewProps> = ({
                             // saat berpindah. Kembali ke Pengiriman berarti kembali ke draf.
                             if (tab.id === 'dispatch') muatDrafVendor(selectedStationId, false);
                             else setSelectedIds([]);
+                            // Penukaran hanya hidup selama satu penerimaan disusun; ia belum
+                            // tersimpan di mana pun, jadi tidak boleh menyeberang tab.
+                            if (tab.id !== 'restock') setPenukaran([]);
                         }}
                         className={`pb-4 px-2 text-sm font-medium transition-all relative flex items-center gap-2 whitespace-nowrap ${activeTab === tab.id
                             ? 'text-indigo-600'
@@ -743,9 +909,15 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
                                     <span className="text-gray-600">Dipilih: <strong>{selectedIds.length}</strong></span>
                                 </div>
+                                {penukaran.length > 0 && (
+                                    <div className="flex items-center gap-2">
+                                        <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                                        <span className="text-gray-600">Ditukar: <strong>{penukaran.length}</strong></span>
+                                    </div>
+                                )}
                             </div>
-                            <button onClick={() => handleSelectAll(refillingCylinders)} className="text-sm text-indigo-600 font-medium hover:underline">
-                                {semuaTerpilih(refillingCylinders) ? 'Batal Pilih Semua' : 'Pilih Semua'}
+                            <button onClick={() => handleSelectAll(tabungKembaliNormal)} className="text-sm text-indigo-600 font-medium hover:underline">
+                                {semuaTerpilih(tabungKembaliNormal) ? 'Batal Pilih Semua' : 'Pilih Semua'}
                             </button>
                         </div>
 
@@ -761,33 +933,95 @@ const RefillView: React.FC<RefillViewProps> = ({
                                                     <th className="px-6 py-3">Kode Seri</th>
                                                     <th className="px-6 py-3">Jenis / Ukuran</th>
                                                     <th className="px-6 py-3">Lokasi Saat Ini</th>
+                                                    <th className="px-6 py-3 text-right">Ditukar Pabrik</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-50">
-                                                {refillingCylinders.map(c => (
-                                                    <tr key={c.id} className={`group cursor-pointer transition-colors ${selectedIds.includes(c.id) ? 'bg-indigo-50/50' : 'hover:bg-gray-50'}`} onClick={() => toggleSelection(c.id)}>
-                                                        <td className="px-6 py-4">
-                                                            <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${selectedIds.includes(c.id) ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300 bg-white'}`}>
-                                                                {selectedIds.includes(c.id) && <span className="material-icons text-white text-sm">check</span>}
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-6 py-4 font-mono font-medium text-gray-900">{c.serialCode}</td>
-                                                        <td className="px-6 py-4 text-gray-600">
-                                                            <span className="px-2 py-1 rounded bg-gray-100 text-xs font-medium">{c.gasType}</span>
-                                                            <span className="ml-2 text-xs text-gray-400">{c.size}</span>
-                                                        </td>
-                                                        <td className="px-6 py-4 text-gray-500 text-xs flex items-center gap-1">
-                                                            <span className="material-icons text-[10px] text-gray-400">store</span>
-                                                            {c.lastLocation}
-                                                        </td>
-                                                    </tr>
-                                                ))}
+                                                {refillingCylinders.map(c => {
+                                                    const tukar = petaPenukaran.get(c.id);
+
+                                                    return (
+                                                        <tr
+                                                            key={c.id}
+                                                            className={`group transition-colors ${tukar
+                                                                ? 'bg-amber-50/70'
+                                                                : selectedIds.includes(c.id)
+                                                                    ? 'bg-indigo-50/50 cursor-pointer'
+                                                                    : 'hover:bg-gray-50 cursor-pointer'
+                                                                }`}
+                                                            onClick={() => { if (!tukar) toggleSelection(c.id); }}
+                                                        >
+                                                            <td className="px-6 py-4">
+                                                                {tukar ? (
+                                                                    <span className="material-icons text-amber-500 text-lg">swap_horiz</span>
+                                                                ) : (
+                                                                    <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${selectedIds.includes(c.id) ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300 bg-white'}`}>
+                                                                        {selectedIds.includes(c.id) && <span className="material-icons text-white text-sm">check</span>}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-6 py-4 font-mono font-medium text-gray-900">{c.serialCode}</td>
+                                                            <td className="px-6 py-4 text-gray-600">
+                                                                <span className="px-2 py-1 rounded bg-gray-100 text-xs font-medium">{c.gasType}</span>
+                                                                <span className="ml-2 text-xs text-gray-400">{c.size}</span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-gray-500 text-xs">
+                                                                <span className="flex items-center gap-1">
+                                                                    <span className="material-icons text-[10px] text-gray-400">store</span>
+                                                                    {c.lastLocation}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-right">
+                                                                {tukar ? (
+                                                                    <div className="flex items-center justify-end gap-2">
+                                                                        <span className="text-xs bg-amber-100 text-amber-800 border border-amber-200 px-2 py-1 rounded font-mono">
+                                                                            → {seriPengganti(tukar)}
+                                                                        </span>
+                                                                        <button
+                                                                            onClick={(e) => { e.stopPropagation(); bukaModalTukar(c); }}
+                                                                            title="Ubah tabung pengganti"
+                                                                            className="text-gray-400 hover:text-amber-600"
+                                                                        >
+                                                                            <span className="material-icons text-sm">edit</span>
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={(e) => { e.stopPropagation(); batalPenukaran(c.id); }}
+                                                                            title="Batalkan penukaran"
+                                                                            className="text-gray-400 hover:text-red-600"
+                                                                        >
+                                                                            <span className="material-icons text-sm">undo</span>
+                                                                        </button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); bukaModalTukar(c); }}
+                                                                        title="Tabung ini ditukar pabrik dengan tabung lain"
+                                                                        className="text-xs text-gray-500 hover:text-amber-700 bg-gray-100 hover:bg-amber-100 px-2 py-1 rounded-lg font-medium inline-flex items-center gap-1 transition-colors"
+                                                                    >
+                                                                        <span className="material-icons text-[14px]">swap_horiz</span>
+                                                                        Tukar
+                                                                    </button>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
                                             </tbody>
                                         </table>
                                     </div>
                                     {/* Mobile Card List */}
                                     <div className="lg:hidden p-4 bg-gray-50 min-h-[300px]">
-                                        {refillingCylinders.map(c => renderCylinderCard(c, selectedIds.includes(c.id), undefined, undefined))}
+                                        {refillingCylinders.map(c => renderCylinderCard(
+                                            c,
+                                            selectedIds.includes(c.id),
+                                            undefined,
+                                            undefined,
+                                            {
+                                                pengganti: petaPenukaran.has(c.id) ? seriPengganti(petaPenukaran.get(c.id)!) : undefined,
+                                                onTukar: () => bukaModalTukar(c),
+                                                onBatal: () => batalPenukaran(c.id)
+                                            }
+                                        ))}
                                     </div>
                                 </>
                             ) : (
@@ -819,16 +1053,22 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     />
                                 </div>
 
-                                <div className="bg-green-50 rounded-lg p-4 border border-green-100">
+                                <div className="bg-green-50 rounded-lg p-4 border border-green-100 space-y-1">
                                     <div className="flex justify-between text-sm">
                                         <span className="text-green-800">Penerimaan</span>
-                                        <span className="font-bold text-green-900">{selectedIds.length} items</span>
+                                        <span className="font-bold text-green-900">{totalDiterima} items</span>
                                     </div>
+                                    {penukaran.length > 0 && (
+                                        <div className="flex justify-between text-xs text-green-700/80">
+                                            <span>termasuk tabung pengganti</span>
+                                            <span className="font-medium">{penukaran.length}</span>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <button
                                     onClick={handleRestockClick}
-                                    disabled={selectedIds.length === 0}
+                                    disabled={totalDiterima === 0}
                                     className="w-full py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-all flex justify-center items-center gap-2 shadow-sm"
                                 >
                                     <span className="material-icons text-sm">check_circle</span>
@@ -854,12 +1094,12 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     />
                                 </div>
                                 <div className="flex items-center justify-center px-4 bg-gray-50 border border-gray-200 rounded-lg text-sm font-bold text-green-600 min-w-[3rem]">
-                                    {selectedIds.length}
+                                    {totalDiterima}
                                 </div>
                             </div>
                             <button
                                 onClick={handleRestockClick}
-                                disabled={selectedIds.length === 0}
+                                disabled={totalDiterima === 0}
                                 className="w-full py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:text-gray-500 text-white rounded-xl font-bold transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
                             >
                                 <span>Konfirmasi Penerimaan</span>
@@ -1116,10 +1356,36 @@ const RefillView: React.FC<RefillViewProps> = ({
                             <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 mb-6 text-center">
                                 <p className="text-gray-500 text-sm mb-1">Total Biaya Dikeluarkan</p>
                                 <p className="text-3xl font-bold text-gray-800 tracking-tight">{formatIDR(parseFloat(restockCost) || 0)}</p>
-                                {selectedIds.length > 0 && parseFloat(restockCost) > 0 && (
-                                    <p className="text-xs text-gray-400 mt-1">Avg: {formatIDR((parseFloat(restockCost) || 0) / selectedIds.length)} / cyl</p>
+                                {totalDiterima > 0 && parseFloat(restockCost) > 0 && (
+                                    <p className="text-xs text-gray-400 mt-1">Avg: {formatIDR((parseFloat(restockCost) || 0) / totalDiterima)} / cyl</p>
                                 )}
                             </div>
+
+                            {penukaran.length > 0 && (
+                                <>
+                                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Tabung Ditukar Pabrik</h4>
+                                    <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 mb-6 space-y-2">
+                                        {penukaran.map(p => {
+                                            const lama = cylinders.find(c => c.id === p.lamaId);
+                                            const sudahTerdaftar = !!p.penggantiId;
+
+                                            return (
+                                                <div key={p.lamaId} className="flex items-center justify-between gap-2 text-sm">
+                                                    <span className="font-mono text-gray-700">{lama?.serialCode || p.lamaId}</span>
+                                                    <span className="material-icons text-amber-500 text-sm">arrow_forward</span>
+                                                    <span className="font-mono font-bold text-amber-900 flex-1">{seriPengganti(p)}</span>
+                                                    <span className="text-[10px] uppercase tracking-wide text-amber-700 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded">
+                                                        {sudahTerdaftar ? 'Sudah terdaftar' : 'Tabung baru'}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+                                        <p className="text-xs text-amber-800 pt-1 border-t border-amber-200">
+                                            Kode seri lama akan ditutup jadi <strong>Tidak Diketahui</strong> dan tidak lagi terhitung sebagai stok.
+                                        </p>
+                                    </div>
+                                </>
+                            )}
 
                             <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Item Diterima</h4>
                             <div className="border border-gray-200 rounded-lg overflow-hidden mb-6 max-h-[200px] overflow-y-auto">
@@ -1157,6 +1423,115 @@ const RefillView: React.FC<RefillViewProps> = ({
                                 >
                                     <span className="material-icons text-sm">check</span>
                                     Konfirmasi
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* TUKAR TABUNG MODAL */}
+            {tabungDitukar && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+                        <div className="bg-amber-600 px-6 py-4 flex justify-between items-center text-white">
+                            <h3 className="font-bold flex items-center gap-2">
+                                <span className="material-icons">swap_horiz</span>
+                                Tabung Ditukar Pabrik
+                            </h3>
+                            <button onClick={() => setTabungDitukar(null)} className="text-amber-100 hover:text-white">
+                                <span className="material-icons">close</span>
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                                <p className="text-xs font-bold text-gray-500 uppercase mb-1">Tabung yang dikirim</p>
+                                <p className="font-mono font-bold text-gray-900">{tabungDitukar.serialCode}</p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                    {tabungDitukar.gasType} &middot; {tabungDitukar.size} &middot; di {tabungDitukar.lastLocation}
+                                </p>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Kode Seri Tabung Pengganti</label>
+                                <input
+                                    type="text"
+                                    autoFocus
+                                    value={formTukar.serialCode}
+                                    onChange={(e) => setFormTukar({ ...formTukar, serialCode: e.target.value.toUpperCase() })}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-amber-500 outline-none"
+                                    placeholder="Kode seri tabung yang pulang"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Jenis Gas</label>
+                                    <select
+                                        value={formTukar.gasType}
+                                        disabled={!!tabungBerkodeSama}
+                                        onChange={(e) => setFormTukar({ ...formTukar, gasType: e.target.value as GasType })}
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100 disabled:text-gray-500"
+                                    >
+                                        {Object.values(GasType).map(g => <option key={g} value={g}>{g}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Ukuran</label>
+                                    <select
+                                        value={formTukar.size}
+                                        disabled={!!tabungBerkodeSama}
+                                        onChange={(e) => setFormTukar({ ...formTukar, size: e.target.value as CylinderSize })}
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none disabled:bg-gray-100 disabled:text-gray-500"
+                                    >
+                                        {Object.values(CylinderSize).map(s => <option key={s} value={s}>{s}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+
+                            {masalahTukar ? (
+                                <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 flex gap-2">
+                                    <span className="material-icons text-base">error_outline</span>
+                                    {masalahTukar}
+                                </p>
+                            ) : !kodeTukar ? (
+                                <p className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                                    Isi kode seri tabung yang benar-benar pulang dari pabrik.
+                                </p>
+                            ) : tabungBerkodeSama ? (
+                                <p className="text-sm text-blue-800 bg-blue-50 border border-blue-200 rounded-lg p-3 flex gap-2">
+                                    <span className="material-icons text-base">info</span>
+                                    <span>
+                                        Kode ini sudah terdaftar ({labelStatusTabung(tabungBerkodeSama.status)}, {tabungBerkodeSama.gasType} {tabungBerkodeSama.size}).
+                                        Catatan itu yang dipakai kembali, jadi tidak ada tabung kembar.
+                                    </span>
+                                </p>
+                            ) : (
+                                <p className="text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg p-3 flex gap-2">
+                                    <span className="material-icons text-base">add_circle_outline</span>
+                                    Tabung baru akan didaftarkan saat penerimaan dikonfirmasi.
+                                </p>
+                            )}
+
+                            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                Kode seri <strong>{tabungDitukar.serialCode}</strong> akan ditutup jadi <strong>Tidak Diketahui</strong>
+                                {' '}berlokasi <strong>Tukar Tabung Lain</strong>, dan tidak lagi terhitung sebagai stok.
+                            </p>
+
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    onClick={() => setTabungDitukar(null)}
+                                    className="flex-1 py-3 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
+                                >
+                                    Batal
+                                </button>
+                                <button
+                                    onClick={simpanPenukaran}
+                                    disabled={!kodeTukar || !!masalahTukar}
+                                    className="flex-1 py-3 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold shadow-lg shadow-amber-200 transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <span className="material-icons text-sm">swap_horiz</span>
+                                    Simpan Penukaran
                                 </button>
                             </div>
                         </div>

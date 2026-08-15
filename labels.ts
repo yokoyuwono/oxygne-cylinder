@@ -39,6 +39,9 @@ export const JENIS_TRANSAKSI: Record<string, string> = {
   DEBT_ADD: 'Bon Dicatat',
   DEPOSIT_REFUND: 'Pengembalian Deposit',
   GAS_EXCHANGE: 'Tukar Isi',
+  // Tabung yang ditukar pabrik dengan tabung lain -- bukan perpindahan gas, tapi
+  // pergantian tabungnya sendiri. Tidak pernah bernominal.
+  CYLINDER_SWAP: 'Tukar Tabung Pabrik',
   // Bukan sekadar 'Pengeluaran' -- biaya isi ulang ke vendor juga pengeluaran,
   // dan keduanya berdampingan di daftar riwayat.
   EXPENSE: 'Biaya Operasional',

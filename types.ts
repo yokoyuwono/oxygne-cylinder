@@ -149,12 +149,31 @@ export interface RefillDraft {
   updatedBy?: string;
 }
 
+/**
+ * Satu tabung yang tidak pulang dari pabrik karena ditukar dengan tabung lain.
+ *
+ * Pabrik kadang mengembalikan tabung yang berbeda dari yang dikirim -- fisiknya
+ * ditukar, jadi yang masuk gudang adalah kode seri lain dan kode seri lama tidak
+ * akan pernah kembali. Isinya niat petugas saat menyusun penerimaan; baru menjadi
+ * perubahan data ketika penerimaan dikonfirmasi.
+ */
+export interface PenukaranTabung {
+  /** Tabung yang dikirim ke pabrik dan tidak kembali. */
+  lamaId: string;
+
+  /** Tabung pengganti yang ternyata sudah terdaftar -- catatannya dipakai ulang. */
+  penggantiId?: string;
+
+  /** Diisi kalau penggantinya belum ada di database sama sekali. */
+  pengganti?: { serialCode: string; gasType: GasType; size: CylinderSize };
+}
+
 export interface Transaction {
   id: string;
   cylinderId?: string; // Optional for DEBT_PAYMENT
   memberId?: string;
   refillStationId?: string; // For refill transactions
-  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEBT_ADD' | 'DEPOSIT_REFUND' | 'DELIVERY' | 'GAS_EXCHANGE' | 'EXPENSE' | 'INCOME';
+  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEBT_ADD' | 'DEPOSIT_REFUND' | 'DELIVERY' | 'GAS_EXCHANGE' | 'CYLINDER_SWAP' | 'EXPENSE' | 'INCOME';
   date: string;
   rentalDuration?: number; // Days held (relevant for RETURN type)
   cost?: number; // Revenue only -- rental fee + gas + regulator. Deposit is NOT included.

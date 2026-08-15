@@ -16,7 +16,7 @@ import HistoryView from './components/HistoryView';
 import MasterDataView from './components/MasterDataView';
 import GasExchangeView, { GasExchangePayload } from './components/GasExchangeView';
 import { NewRentalPayload } from './components/NewRentalForm';
-import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff } from './types';
+import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, PenukaranTabung, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff } from './types';
 import { bolehKelolaPengguna } from './lib/peran';
 import KasView, { KasPayload } from './components/KasView';
 import BonView, { BayarBonPayload, TambahBonPayload } from './components/BonView';
@@ -529,39 +529,145 @@ const App: React.FC = () => {
     }
   };
 
-  const handleReceiveFromRefill = async (cylinderIds: string[], totalCost: number) => {
-    const date = new Date().toISOString();
-    const costPerUnit = totalCost / cylinderIds.length;
+  /**
+   * Terima tabung yang pulang dari pabrik -- termasuk yang pulang sebagai tabung lain.
+   *
+   * `penukaran` memuat tabung yang ditukar pabrik: kode seri lamanya tidak akan pernah
+   * kembali, penggantinya kadang belum pernah tercatat sama sekali. Keduanya ikut satu
+   * batch biaya yang sama, karena tabung pengganti tetap satu kali isi ulang yang dibayar.
+   */
+  const handleReceiveFromRefill = async (
+    cylinderIds: string[],
+    totalCost: number,
+    penukaran: PenukaranTabung[] = []
+  ) => {
+    const jumlahDiterima = cylinderIds.length + penukaran.length;
+    if (jumlahDiterima === 0) return;
 
-    const newTransactions: Transaction[] = cylinderIds.map(id => ({
-      id: `t-ref-in-${Date.now()}-${id}`,
-      cylinderId: id,
-      type: 'REFILL_IN',
-      date: date,
-      cost: costPerUnit
-    }));
+    const date = new Date().toISOString();
+    const costPerUnit = totalCost / jumlahDiterima;
+
+    // Tabung pengganti yang belum pernah tercatat harus lahir lebih dulu:
+    // transactions."cylinderId" menunjuk cylinders.id, jadi baris transaksinya ditolak
+    // selama tabungnya belum ada.
+    const tabungBaru: Cylinder[] = [];
+    const idPengganti = new Map<string, string>(); // id tabung lama -> id penggantinya
+
+    penukaran.forEach((p, i) => {
+      if (p.penggantiId) {
+        idPengganti.set(p.lamaId, p.penggantiId);
+        return;
+      }
+      if (!p.pengganti) return;
+
+      const baru: Cylinder = {
+        id: `c-tukar-${Date.now()}-${i}`,
+        serialCode: p.pengganti.serialCode,
+        gasType: p.pengganti.gasType,
+        size: p.pengganti.size,
+        status: CylinderStatus.Available,
+        lastLocation: 'Gudang Utama',
+        heldSince: null
+      };
+      tabungBaru.push(baru);
+      idPengganti.set(p.lamaId, baru.id);
+    });
+
+    // Satu-satunya langkah di alur ini yang errornya tidak boleh ditelan: kalau tabung
+    // pengganti gagal masuk sementara tabung lama sudah ditutup, gudang kehilangan
+    // catatan tabung yang benar-benar ada di rak.
+    if (tabungBaru.length > 0) {
+      const { error } = await supabase.from('cylinders').insert(tabungBaru);
+      if (error) {
+        console.error('Gagal mendaftarkan tabung pengganti:', error);
+        throw error;
+      }
+    }
+
+    const idDiterima = [...cylinderIds, ...idPengganti.values()];
+    const idLama = penukaran.map(p => p.lamaId);
 
     await supabase.from('cylinders').update({
       status: CylinderStatus.Available,
       currentHolder: null,
       lastLocation: 'Gudang Utama',
       heldSince: null
-    }).in('id', cylinderIds);
+    }).in('id', idDiterima);
+
+    if (idLama.length > 0) {
+      await supabase.from('cylinders').update({
+        status: CylinderStatus.Unknown,
+        currentHolder: null,
+        lastLocation: 'Tukar Tabung Lain',
+        heldSince: null
+      }).in('id', idLama);
+    }
+
+    const seri = (id: string) =>
+      cylinders.find(c => c.id === id)?.serialCode
+      ?? tabungBaru.find(c => c.id === id)?.serialCode
+      ?? id;
+
+    const newTransactions: Transaction[] = [
+      ...cylinderIds.map(id => ({
+        id: `t-ref-in-${Date.now()}-${id}`,
+        cylinderId: id,
+        type: 'REFILL_IN' as const,
+        date: date,
+        cost: costPerUnit
+      })),
+      ...penukaran.flatMap(p => {
+        const baruId = idPengganti.get(p.lamaId);
+        if (!baruId) return [];
+
+        return [
+          {
+            id: `t-ref-in-${Date.now()}-${baruId}`,
+            cylinderId: baruId,
+            type: 'REFILL_IN' as const,
+            date: date,
+            cost: costPerUnit,
+            description: `Pengganti tabung ${seri(p.lamaId)}`
+          },
+          // Tanpa nominal: uangnya sudah tercatat di baris tabung penggantinya, dan
+          // baris ini cuma menjelaskan ke mana perginya tabung lama.
+          {
+            id: `t-tukar-${Date.now()}-${p.lamaId}`,
+            cylinderId: p.lamaId,
+            type: 'CYLINDER_SWAP' as const,
+            date: date,
+            description: `Ditukar pabrik dengan ${seri(baruId)}`
+          }
+        ];
+      })
+    ];
 
     await supabase.from('transactions').insert(newTransactions);
 
-    setCylinders(prev => prev.map(c => {
-      if (cylinderIds.includes(c.id)) {
-        return {
-          ...c,
-          status: CylinderStatus.Available,
-          currentHolder: undefined,
-          lastLocation: 'Gudang Utama',
-          heldSince: null
-        };
-      }
-      return c;
-    }));
+    setCylinders(prev => [
+      ...prev.map(c => {
+        if (idDiterima.includes(c.id)) {
+          return {
+            ...c,
+            status: CylinderStatus.Available,
+            currentHolder: undefined,
+            lastLocation: 'Gudang Utama',
+            heldSince: null
+          };
+        }
+        if (idLama.includes(c.id)) {
+          return {
+            ...c,
+            status: CylinderStatus.Unknown,
+            currentHolder: undefined,
+            lastLocation: 'Tukar Tabung Lain',
+            heldSince: null
+          };
+        }
+        return c;
+      }),
+      ...tabungBaru
+    ]);
 
     setTransactions(prev => [...prev, ...newTransactions]);
   };

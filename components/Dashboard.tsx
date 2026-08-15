@@ -361,6 +361,10 @@ function ringkasAktivitas(
       case 'GAS_EXCHANGE':
         // memberId boleh kosong -- tukar isi terbuka untuk pembeli lepas.
         return baris(tx, `Tukar isi ${sebutanBarang(tx)} ${member ? `untuk ${member.companyName}` : '(pembeli lepas)'}`, 'swap_horiz', 'text-teal-600 bg-teal-50');
+      case 'CYLINDER_SWAP':
+        // Keterangannya menyebut kode seri penggantinya, dan itu satu-satunya isi baris
+        // ini -- tidak ada uang yang berpindah di sini.
+        return baris(tx, `${barang}: ${tx.description || 'ditukar pabrik'}`, 'swap_horiz', 'text-amber-600 bg-amber-50');
       case 'EXPENSE':
         return baris(tx, `Biaya operasional: ${tx.description || 'tanpa keterangan'}`, 'receipt_long', 'text-rose-600 bg-rose-50');
       case 'INCOME':

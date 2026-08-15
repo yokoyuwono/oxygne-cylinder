@@ -313,6 +313,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           case 'DEPOSIT_REFUND': return { title: 'Pengembalian Deposit', subtitle: `Ke ${member?.companyName}`, icon: 'savings', color: 'bg-purple-100 text-purple-600', badge: 'REFUND' };
           case 'DELIVERY': return { title: `Pengiriman ${code}`, subtitle: 'Dalam Perjalanan', icon: 'local_shipping', color: 'bg-cyan-100 text-cyan-600', badge: 'ANTAR' };
           case 'GAS_EXCHANGE': return { title: `Tukar Isi ${sebutanBarang(t)}`, subtitle: member ? `Untuk ${member.companyName}` : 'Pembeli lepas', icon: 'swap_horiz', color: 'bg-teal-100 text-teal-600', badge: 'TUKAR' };
+          case 'CYLINDER_SWAP': return { title: `Tukar Tabung ${code}`, subtitle: t.description || 'Ditukar pabrik', icon: 'swap_horiz', color: 'bg-amber-100 text-amber-600', badge: 'TUKAR TABUNG' };
           case 'EXPENSE': return { title: t.description || 'Biaya Operasional', subtitle: 'Belanja operasional', icon: 'receipt_long', color: 'bg-rose-100 text-rose-600', badge: 'BIAYA' };
           case 'INCOME': return { title: t.description || 'Penjualan Lain', subtitle: 'Penjualan lepas', icon: 'trending_up', color: 'bg-green-100 text-green-600', badge: 'JUAL' };
           default: return { title: 'Tidak diketahui', subtitle: '', icon: 'help', color: 'bg-gray-100', badge: 'LAIN' };
@@ -330,6 +331,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           case 'DEPOSIT_REFUND': return 'bg-purple-100 text-purple-800';
           case 'DELIVERY': return 'bg-cyan-100 text-cyan-800';
           case 'GAS_EXCHANGE': return 'bg-teal-100 text-teal-800';
+          case 'CYLINDER_SWAP': return 'bg-amber-100 text-amber-800';
           case 'EXPENSE': return 'bg-rose-100 text-rose-800';
           case 'INCOME': return 'bg-green-100 text-green-800';
           default: return 'bg-gray-100 text-gray-800';
@@ -771,6 +773,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                       <option value="DEPOSIT_REFUND">Pengembalian Deposit</option>
                       <option value="DELIVERY">Pengiriman</option>
                       <option value="GAS_EXCHANGE">Tukar Isi</option>
+                      <option value="CYLINDER_SWAP">Tukar Tabung Pabrik</option>
                       <option value="INCOME">Penjualan Lain</option>
                       <option value="EXPENSE">Biaya Operasional</option>
                   </select>

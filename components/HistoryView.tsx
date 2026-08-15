@@ -124,6 +124,13 @@ const HistoryView: React.FC<HistoryViewProps> = ({ transactions, cylinders, memb
                                     icon = 'swap_horiz';
                                     colorClass = 'text-teal-600 bg-teal-50';
                                     break;
+                                case 'CYLINDER_SWAP':
+                                    // Keterangannya menyebut kode seri penggantinya, dan itu
+                                    // satu-satunya isi baris ini -- tidak ada uang di sini.
+                                    description = `${sebutanBarang(tx, cyl?.serialCode)}: ${tx.description || 'ditukar pabrik'}`;
+                                    icon = 'swap_horiz';
+                                    colorClass = 'text-amber-600 bg-amber-50';
+                                    break;
                                 case 'EXPENSE':
                                     description = `Biaya operasional: ${tx.description || 'tanpa keterangan'}`;
                                     icon = 'receipt_long';
