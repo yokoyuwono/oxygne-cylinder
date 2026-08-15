@@ -46,6 +46,9 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
   // -- Delete Confirmation State --
   const [cylinderToDelete, setCylinderToDelete] = useState<Cylinder | null>(null);
 
+  // -- Reset Confirmation State --
+  const [cylinderToReset, setCylinderToReset] = useState<Cylinder | null>(null);
+
   // -- 1. Debounce Search Term --
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -182,6 +185,22 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
           onDelete(cylinderToDelete.id);
           setCylinderToDelete(null);
           // Refresh list
+          setTimeout(fetchCylinders, 500);
+      }
+  };
+
+  // Kembalikan tabung ke keadaan tak tercatat: status, pemegang, tanggal pegang,
+  // dan lokasi dilepas sekaligus supaya tidak ada sisa data pemegang lama.
+  const confirmReset = () => {
+      if (cylinderToReset) {
+          onUpdate({
+              ...cylinderToReset,
+              status: CylinderStatus.Unknown,
+              currentHolder: null as any,
+              heldSince: null,
+              lastLocation: 'nowhere',
+          });
+          setCylinderToReset(null);
           setTimeout(fetchCylinders, 500);
       }
   };
@@ -389,6 +408,9 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                         <td className="px-6 py-4 text-gray-500">{cyl.lastLocation}</td>
                         <td className="px-6 py-4 text-right">
                             <div className="flex justify-end gap-2">
+                                <button onClick={() => setCylinderToReset(cyl)} title="Reset status tabung" className="text-gray-400 hover:text-amber-600">
+                                    <span className="material-icons text-sm">restart_alt</span>
+                                </button>
                                 <button onClick={() => handleOpenEdit(cyl)} className="text-gray-400 hover:text-indigo-600">
                                     <span className="material-icons text-sm">edit</span>
                                 </button>
@@ -699,6 +721,51 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
                             className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-bold shadow-md shadow-red-200 transition-colors"
                         >
                             Hapus Tabung
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* RESET CONFIRMATION MODAL */}
+      {cylinderToReset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 overflow-hidden animate-fade-in-up">
+                <div className="bg-amber-600 px-6 py-4 border-b border-amber-700 flex justify-between items-center text-white">
+                    <h3 className="font-bold flex items-center gap-2">
+                        <span className="material-icons">restart_alt</span>
+                        Konfirmasi Reset Tabung
+                    </h3>
+                    <button onClick={() => setCylinderToReset(null)} className="text-amber-100 hover:text-white">
+                        <span className="material-icons">close</span>
+                    </button>
+                </div>
+                <div className="p-6">
+                    <p className="text-gray-700 text-sm mb-4">
+                        Reset catatan tabung <strong>{cylinderToReset.serialCode}</strong> ke keadaan tak tercatat?
+                    </p>
+                    <ul className="text-xs text-gray-600 bg-gray-50 p-3 rounded mb-4 space-y-1 list-disc list-inside">
+                        <li>Status menjadi <strong>Tidak Diketahui</strong></li>
+                        <li>Tanggal sewa dikosongkan</li>
+                        <li>Lokasi menjadi <strong>nowhere</strong></li>
+                        <li>Pemegang tabung dikosongkan</li>
+                    </ul>
+                    <p className="text-xs text-amber-700 bg-amber-50 p-2 rounded mb-4">
+                        Tanggal sewa yang lama hilang permanen dan tidak bisa dikembalikan.
+                    </p>
+                    <div className="flex justify-end gap-3">
+                        <button
+                            onClick={() => setCylinderToReset(null)}
+                            className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors"
+                        >
+                            Batal
+                        </button>
+                        <button
+                            onClick={confirmReset}
+                            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-bold shadow-md shadow-amber-200 transition-colors"
+                        >
+                            Reset Tabung
                         </button>
                     </div>
                 </div>
