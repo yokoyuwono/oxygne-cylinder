@@ -574,54 +574,35 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
               </div>
 
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                  {/* Pemasukan dipecah di kartunya sendiri, bukan di kartu terpisah di
+                      bawah: yang dicari saat membuka laporan adalah baris ringkasan ini,
+                      dan angka yang harus dicocokkan dengan laci ada di sini. */}
+                  <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm col-span-2 lg:col-span-1">
                       <p className="text-xs text-gray-500 uppercase font-bold">Pemasukan</p>
                       <p className="text-2xl font-bold text-green-600">{formatIDR(laporanHarian.pemasukan)}</p>
+
+                      {/* Melebar penuh di HP: setengah lebar memotong nama kelompok jadi
+                          "Tidak Dic..." -- rincian yang tidak terbaca tidak ada gunanya. */}
+                      <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+                          {pemasukanPerMetode.map(metode => (
+                              <div key={metode.id} className="flex items-center justify-between gap-2">
+                                  <span className="flex items-center gap-1.5 min-w-0 text-gray-500">
+                                      <span className="material-icons text-sm text-gray-400 shrink-0">{metode.ikon}</span>
+                                      <span className="text-xs truncate">{metode.label}</span>
+                                  </span>
+                                  <span className="text-sm font-bold text-gray-800 whitespace-nowrap">{formatIDR(metode.total)}</span>
+                              </div>
+                          ))}
+                      </div>
                   </div>
                   <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
                       <p className="text-xs text-gray-500 uppercase font-bold">Pengeluaran</p>
                       <p className="text-2xl font-bold text-red-600">{formatIDR(laporanHarian.pengeluaran)}</p>
                   </div>
-                  <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm col-span-2 lg:col-span-1">
+                  <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
                       <p className="text-xs text-gray-500 uppercase font-bold">Jumlah Transaksi</p>
                       <p className="text-2xl font-bold text-gray-800">{laporanHarian.jumlahTransaksi}</p>
                   </div>
-              </div>
-
-              {/* Pemasukan per Metode -- memecah kartu Pemasukan di atas supaya uang di
-                  laci bisa dicocokkan dengan yang masuk rekening. Sengaja tidak dijaga
-                  peran: tab ini memang tab yang dilihat Operator setiap hari. */}
-              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                  <div className="flex items-center justify-between gap-3 mb-4">
-                      <h3 className="font-bold text-gray-800">Pemasukan per Metode</h3>
-                      <span className="text-sm font-bold text-gray-500">{formatIDR(laporanHarian.pemasukan)}</span>
-                  </div>
-
-                  {pemasukanPerMetode.length > 0 ? (
-                      <div className="space-y-3">
-                          {pemasukanPerMetode.map(metode => (
-                              <div key={metode.id}>
-                                  <div className="flex items-center justify-between gap-3 mb-1.5">
-                                      <div className="flex items-center gap-2 min-w-0">
-                                          <span className="material-icons text-base text-gray-400 shrink-0">{metode.ikon}</span>
-                                          <p className="text-sm text-gray-700 font-medium truncate">{metode.label}</p>
-                                      </div>
-                                      <div className="flex items-baseline gap-3 shrink-0">
-                                          <p className="text-sm font-bold text-gray-900">{formatIDR(metode.total)}</p>
-                                          <span className="text-xs text-gray-400 w-9 text-right">{metode.persen.toFixed(0)}%</span>
-                                      </div>
-                                  </div>
-                                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                      <div className="h-full bg-green-400 rounded-full" style={{ width: `${metode.persen}%` }} />
-                                  </div>
-                              </div>
-                          ))}
-                      </div>
-                  ) : (
-                      <div className="h-24 flex items-center justify-center text-gray-400 text-sm">
-                          Belum ada pemasukan pada tanggal ini.
-                      </div>
-                  )}
               </div>
 
               {laporanHarian.transaksi.length > 0 ? (

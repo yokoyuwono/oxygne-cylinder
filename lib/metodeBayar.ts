@@ -73,14 +73,25 @@ export interface BarisMetode extends KelompokMetode {
 }
 
 /**
- * Pemasukan dipecah per metode, urut dari yang terbesar.
+ * Pemasukan dipecah per metode: tunai dan transfer lebih dulu, sisanya urut dari
+ * yang terbesar.
+ *
+ * Urutannya tidak murni berdasarkan nominal. Tunai dan transfer adalah pemisahan
+ * yang dicari orang saat membuka laporan; menaruhnya di bawah "Tidak Dicatat" cuma
+ * karena angkanya sedang kecil membuat yang dicari justru paling sulit ditemukan.
+ * Kelompok penampung adalah sisa, jadi tempatnya memang di belakang.
  *
  * Memakai ulang predikat barisPendapatan, bukan filter sendiri: kalau keduanya
  * berbeda, rincian dan kartu Pemasukan akan berselisih dan tidak ada yang tahu mana
  * yang benar.
  */
 export function rekapPemasukanPerMetode(transactions: Transaction[]): BarisMetode[] {
-  const total = new Map<string, BarisMetode>();
+  // Tunai dan transfer selalu muncul, walau nol. Pemisahannya baru bisa dibaca sebagai
+  // pemisahan kalau kedua sisinya kelihatan -- satu baris "Tunai" sendirian menyisakan
+  // pertanyaan apakah transfernya nol atau memang tidak dicatat.
+  const total = new Map<string, BarisMetode>(
+    METODE_BAYAR.map(m => [m.id, { ...m, total: 0, persen: 0 }])
+  );
 
   for (const t of transactions) {
     if (!barisPendapatan(t)) continue;
@@ -94,7 +105,13 @@ export function rekapPemasukanPerMetode(transactions: Transaction[]): BarisMetod
   const semua = [...total.values()];
   const jumlah = semua.reduce((n, b) => n + b.total, 0);
 
+  const urutanPokok = METODE_BAYAR.map(m => m.id as string);
+  const peringkat = (b: BarisMetode) => {
+    const i = urutanPokok.indexOf(b.id);
+    return i >= 0 ? i : urutanPokok.length;
+  };
+
   return semua
     .map(b => ({ ...b, persen: jumlah > 0 ? (b.total / jumlah) * 100 : 0 }))
-    .sort((a, b) => b.total - a.total);
+    .sort((a, b) => peringkat(a) - peringkat(b) || b.total - a.total);
 }
