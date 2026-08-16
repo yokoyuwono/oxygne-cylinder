@@ -13,9 +13,20 @@ import { Transaction } from '../types';
  * Tukar isi juga pendapatan; kalau hanya RENTAL_OUT yang dihitung, penjualan gas ke
  * pembeli lepas hilang. INCOME menampung penjualan lepas yang tidak lewat tabung
  * sama sekali -- selang regulator, kran oksigen, dan sejenisnya.
+ *
+ * ORDER_PAYMENT adalah uang untuk pesanan di Antrian Isi -- penjualan gas yang
+ * sungguhan, cuma barangnya diserahkan belakangan. Barisnya bertanggal hari uangnya
+ * berpindah, jadi menghitungnya di sini membuat pemasukan tercatat pada hari uang itu
+ * benar-benar masuk laci. Baris barang pesanan (RETURN dan RENTAL_OUT bernominal nol)
+ * tersaring sendiri oleh syarat cost > 0.
+ *
+ * Daftar jenis ini tidak boleh disalin ke tempat lain. Rekap per metode bayar dan tab
+ * Keuangan memakai ulang predikat ini justru supaya tidak ada dua daftar yang bisa
+ * berselisih -- lihat rekapPemasukanPerMetode di lib/metodeBayar.ts.
  */
 export const barisPendapatan = (t: Transaction) =>
-  (t.type === 'RENTAL_OUT' || t.type === 'GAS_EXCHANGE' || t.type === 'INCOME') && (t.cost || 0) > 0;
+  (t.type === 'RENTAL_OUT' || t.type === 'GAS_EXCHANGE' || t.type === 'INCOME' ||
+   t.type === 'ORDER_PAYMENT') && (t.cost || 0) > 0;
 
 /** Biaya isi ulang ke vendor dan belanja operasional harian sama-sama uang keluar. */
 export const barisPengeluaran = (t: Transaction) =>

@@ -176,12 +176,90 @@ export interface PenukaranTabung {
  */
 export type MetodeBayar = 'CASH' | 'TRANSFER';
 
+/**
+ * Jenis pesanan antrian isi. Nilainya berbahasa Inggris-Indonesia campuran seperti
+ * yang tersimpan di database; labelnya di lib/antrianIsi.ts.
+ */
+export type JenisPesanan = 'TITIP_ISI' | 'TUKAR_BESAR' | 'TUKAR_KECIL';
+
+export type StatusPesanan = 'MENUNGGU' | 'SELESAI' | 'BATAL';
+
+/**
+ * Pesanan yang isinya belum diserahkan -- keadaan "toko berutang isi ke pelanggan",
+ * kebalikan dari bon.
+ *
+ * Tiga kejadian yang bentuknya sama: pelanggan menitipkan tabung miliknya sendiri
+ * untuk diisi, atau menaruh tabung kosong karena stok isi sedang habis (yang besar
+ * berkode maupun yang kecil curah). Ketiganya sama-sama menyisakan janji yang harus
+ * ditagih balik oleh toko sendiri.
+ *
+ * UANG DAN BARANG DUA PERISTIWA TERPISAH. Yang bernominal cuma baris ORDER_PAYMENT
+ * di transactions, dan tanggalnya tanggal uang itu benar-benar berpindah -- bisa
+ * sebelum, saat, atau sesudah penyerahan. Baris barang (RETURN saat tabung kosong
+ * masuk, RENTAL_OUT saat tabung penuh keluar) selalu bernominal nol.
+ */
+export interface GasOrder {
+  id: string;
+  jenis: JenisPesanan;
+  status: StatusPesanan;
+
+  /** Wajib untuk TUKAR_BESAR; kosong berarti pembeli lepas tanpa akun. */
+  memberId?: string | null;
+
+  /**
+   * Selalu terisi, juga untuk pelanggan terdaftar. Pelanggan bisa dihapus dan
+   * memberId ikut jadi null, sementara kartunya masih harus terbaca punya siapa.
+   */
+  namaPembeli: string;
+
+  gasType?: GasType | null;
+  size?: CylinderSize | null;
+  quantity: number;
+
+  /**
+   * Tabung kosong yang masuk dan tabung penuh yang keluar -- dua tabung berbeda,
+   * dan yang keluar baru dipilih saat penyerahan. Keduanya hanya untuk TUKAR_BESAR.
+   */
+  cylinderMasukId?: string | null;
+  cylinderKeluarId?: string | null;
+
+  /** Kode seri tabung MILIK PELANGGAN, teks bebas -- tidak terdaftar di cylinders. */
+  serialTitipan?: string | null;
+
+  /**
+   * Taksiran harga saat pesanan masuk; untuk titip isi kadang baru diketahui setelah
+   * pabrik menagih. BUKAN sumber angka laporan -- itu ada di baris ORDER_PAYMENT.
+   */
+  harga?: number | null;
+
+  transaksiBayarId?: string | null;
+  transaksiTerimaId?: string | null;
+  transaksiSerahId?: string | null;
+
+  catatan?: string | null;
+  alasanBatal?: string | null;
+  tanggalMasuk: string;
+  tanggalSelesai?: string | null;
+  dibuatOleh?: string | null;
+}
+
 export interface Transaction {
   id: string;
   cylinderId?: string; // Optional for DEBT_PAYMENT
   memberId?: string;
   refillStationId?: string; // For refill transactions
-  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEBT_ADD' | 'DEPOSIT_REFUND' | 'DELIVERY' | 'GAS_EXCHANGE' | 'CYLINDER_SWAP' | 'EXPENSE' | 'INCOME';
+  /**
+   * ORDER_PAYMENT adalah baris uang sebuah pesanan antrian isi -- lihat GasOrder.
+   *
+   * Sengaja jenis tersendiri, bukan menumpang yang sudah ada. INCOME akan membuatnya
+   * muncul di halaman Uang Masuk lengkap dengan tombol Hapus, dan penghapusannya
+   * keras -- baris yang masih dirujuk pesanan hilang atau gagal dengan pesan database
+   * mentah. GAS_EXCHANGE lebih halus tapi lebih berbahaya: batalkan_transaksi
+   * membatalkannya tanpa membalik apa pun, dengan alasan "botol masuk satu, keluar
+   * satu" -- justru asumsi yang tidak berlaku untuk pesanan yang barangnya belum
+   * diserahkan.
+   */
+  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEBT_ADD' | 'DEPOSIT_REFUND' | 'DELIVERY' | 'GAS_EXCHANGE' | 'CYLINDER_SWAP' | 'EXPENSE' | 'INCOME' | 'ORDER_PAYMENT';
   date: string;
   rentalDuration?: number; // Days held (relevant for RETURN type)
   cost?: number; // Revenue only -- rental fee + gas + regulator. Deposit is NOT included.

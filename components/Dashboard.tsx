@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Cylinder, Transaction, Member, RefillStation, RentalTariff } from '../types';
+import { Cylinder, Transaction, Member, GasOrder, RefillStation, RentalTariff } from '../types';
 import { sebutanBarang } from '../lib/bulkStock';
 import {
   ItemTindakan,
@@ -21,16 +21,17 @@ interface DashboardProps {
   members: Member[];
   stations: RefillStation[];
   tariffs: RentalTariff[];
+  gasOrders: GasOrder[];
 }
 
 const KARTU = 'bg-white rounded-xl shadow-sm border border-gray-100';
 
-const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members, stations, tariffs }) => {
+const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members, stations, tariffs, gasOrders }) => {
   const navigate = useNavigate();
 
   const antrian = useMemo(
-    () => hitungAntrianTindakan(cylinders, transactions, members, tariffs),
-    [cylinders, transactions, members, tariffs]);
+    () => hitungAntrianTindakan(cylinders, transactions, members, tariffs, gasOrders),
+    [cylinders, transactions, members, tariffs, gasOrders]);
 
   const stok = useMemo(
     () => hitungKesiapanStok(cylinders, transactions, tariffs),

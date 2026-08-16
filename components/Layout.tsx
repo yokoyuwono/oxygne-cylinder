@@ -42,6 +42,7 @@ const MENU: GrupMenu[] = [
     item: [
       { to: '/rental', ikon: 'shopping_cart_checkout', label: 'Tukar Besar & Sewa' },
       { to: '/tukar-isi', ikon: 'swap_horiz', label: 'Tukar Kecil' },
+      { to: '/antrian', ikon: 'pending_actions', label: 'Antrian Isi' },
       { to: '/kas', ikon: 'account_balance_wallet', label: 'Uang Masuk & Keluar' },
       { to: '/bon', ikon: 'receipt_long', label: 'Bon Pelanggan' },
     ],

@@ -15,8 +15,10 @@ import AdminView from './components/AdminView';
 import HistoryView from './components/HistoryView';
 import MasterDataView from './components/MasterDataView';
 import GasExchangeView, { GasExchangePayload } from './components/GasExchangeView';
+import AntrianIsiView, { BayarPesananPayload, BuatPesananPayload, SerahPesananPayload } from './components/AntrianIsiView';
 import { NewRentalPayload } from './components/NewRentalForm';
-import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, PenukaranTabung, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff, MetodeBayar } from './types';
+import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, PenukaranTabung, AppUser, UserRole, MemberStatus, GasPrice, GasOrder, RentalTariff, MetodeBayar } from './types';
+import { JENIS_PESANAN } from './lib/antrianIsi';
 import { bolehKelolaPengguna } from './lib/peran';
 import KasView, { KasPayload } from './components/KasView';
 import { PengeluaranPayload } from './lib/pengeluaran';
@@ -44,6 +46,37 @@ const keAppUser = (baris: BarisProfil): AppUser => ({
   name: baris.name || 'Tanpa Nama',
   role: (baris.role as UserRole) || UserRole.Operator,
   lastLogin: baris.lastLogin || undefined,
+});
+
+/**
+ * Baris uang sebuah pesanan antrian isi.
+ *
+ * Satu-satunya baris pesanan yang bernominal; baris barangnya selalu nol. Bentuknya
+ * dijadikan satu fungsi karena dipakai tiga jalur yang berjauhan -- bayar di muka,
+ * bayar belakangan, dan bayar saat penyerahan -- dan ketiganya harus menghasilkan
+ * baris yang persis sama supaya laporan tidak membedakan uang yang datang lebih awal
+ * dari uang yang datang terlambat.
+ *
+ * Bon pesanan diperlakukan sama dengan sewa kredit yang sudah berjalan: tetap
+ * terhitung pemasukan hari itu, tapi masuk kelompok "Belum Dibayar" di rekap metode
+ * bayar. Mengeluarkannya dari pendapatan akan membuat rincian per metode tidak pernah
+ * cocok dengan kartu Pemasukan -- lihat lib/metodeBayar.ts.
+ */
+const barisBayarPesanan = (
+  pesanan: GasOrder,
+  bayar: { jumlah: number; metodeBayar?: MetodeBayar; bon?: boolean },
+  tanggal: string
+): Transaction => ({
+  id: `t-antri-bayar-${Date.now()}`,
+  memberId: pesanan.memberId || undefined,
+  type: 'ORDER_PAYMENT',
+  date: tanggal,
+  cost: bayar.jumlah,
+  paymentStatus: bayar.bon ? 'UNPAID' : 'PAID',
+  // Kosong untuk bon, sama seperti sewa kredit: uangnya belum berpindah, jadi belum
+  // ada metodenya.
+  paymentMethod: bayar.bon ? undefined : bayar.metodeBayar,
+  description: `${JENIS_PESANAN[pesanan.jenis] || pesanan.jenis} - ${pesanan.namaPembeli}`,
 });
 
 const App: React.FC = () => {
@@ -89,6 +122,7 @@ const App: React.FC = () => {
   const [refillDrafts, setRefillDrafts] = useState<RefillDraft[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]); // For Admin View
   const [tariffs, setTariffs] = useState<RentalTariff[]>([]);
+  const [gasOrders, setGasOrders] = useState<GasOrder[]>([]);
 
   // -- 1. FETCH INITIAL DATA --
   const fetchData = async () => {
@@ -104,7 +138,8 @@ const App: React.FC = () => {
         rpData,
         prData,
         rtData,
-        rdData
+        rdData,
+        goData
       ] = await Promise.all([
         fetchAllRecords<Cylinder>('cylinders'),
         fetchAllRecords<Member>('members'),
@@ -119,7 +154,8 @@ const App: React.FC = () => {
         fetchAllRecords<BarisProfil>('profiles'),
         fetchAllRecords<RentalTariff>('rental_tariffs'),
         // Tanpa kolom `id` -- barisnya berkunci "stationId", satu draf per vendor.
-        fetchAllRecords<RefillDraft>('refill_drafts', '*', undefined, 'stationId')
+        fetchAllRecords<RefillDraft>('refill_drafts', '*', undefined, 'stationId'),
+        fetchAllRecords<GasOrder>('gas_orders')
       ]);
 
       if (cylData) setCylinders(cylData);
@@ -132,6 +168,7 @@ const App: React.FC = () => {
       if (prData) setUsers(prData.map(keAppUser));
       if (rtData) setTariffs(rtData);
       if (rdData) setRefillDrafts(rdData);
+      if (goData) setGasOrders(goData);
 
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -881,6 +918,241 @@ const App: React.FC = () => {
   };
 
   /**
+   * Mencatat pesanan yang isinya belum bisa diserahkan.
+   *
+   * Urutan tulisnya disengaja: baris pesanan lebih dulu -- dengan pengait transaksi
+   * masih kosong -- baru barangnya, uangnya, dan terakhir pengaitnya diisi. Kalau
+   * putus di tengah, yang tertinggal adalah pesanan yang kelihatan di layar dan bisa
+   * dibatalkan, bukan tabung yang berpindah tanpa asal-usul. Alasan yang sama dengan
+   * urutan di handleTambahBon.
+   *
+   * Hanya tukar besar yang menggerakkan barang. Tabung titipan bukan aset toko dan
+   * tidak pernah masuk cylinders; botol curah tidak menggerakkan stok karena stockQty
+   * adalah angka kepemilikan, dan kepemilikan memang tidak berubah saat botol kosong
+   * menginap di rak. Untuk keduanya, kartu pesanan adalah satu-satunya catatan.
+   */
+  const handleBuatPesanan = async (p: BuatPesananPayload) => {
+    if (p.jenis === 'TUKAR_BESAR' && (!p.memberId || !p.cylinderMasukId)) {
+      throw new Error('Tukar besar butuh pelanggan terdaftar dan tabung yang ditaruh.');
+    }
+
+    const id = `p-${Date.now()}`;
+    const member = p.memberId ? members.find(m => m.id === p.memberId) : undefined;
+
+    const pesanan: GasOrder = {
+      id,
+      jenis: p.jenis,
+      status: 'MENUNGGU',
+      memberId: p.memberId || null,
+      namaPembeli: p.namaPembeli || member?.companyName || 'Pembeli Lepas',
+      gasType: p.gasType || null,
+      size: p.size || null,
+      quantity: p.quantity || 1,
+      cylinderMasukId: p.cylinderMasukId || null,
+      cylinderKeluarId: null,
+      serialTitipan: p.serialTitipan || null,
+      harga: p.harga ?? null,
+      transaksiBayarId: null,
+      transaksiTerimaId: null,
+      transaksiSerahId: null,
+      catatan: p.catatan || null,
+      alasanBatal: null,
+      tanggalMasuk: p.tanggal,
+      tanggalSelesai: null,
+      dibuatOleh: currentUser?.name || null,
+    };
+
+    const { error } = await supabase.from('gas_orders').insert(pesanan);
+    if (error) throw new Error(`Gagal mencatat pesanan: ${error.message}`);
+
+    const transaksiBaru: Transaction[] = [];
+    const kait: Partial<GasOrder> = {};
+
+    if (p.jenis === 'TUKAR_BESAR' && p.cylinderMasukId && p.memberId) {
+      // Tabung kosongnya benar-benar masuk gudang, jadi statusnya berubah persis
+      // seperti pengembalian biasa -- itu yang membuatnya langsung muncul di halaman
+      // Pabrik dan di antrian tindakan Beranda.
+      const { error: errTabung } = await supabase.from('cylinders').update({
+        status: CylinderStatus.EmptyRefill,
+        currentHolder: null,
+        lastLocation: 'Gudang Utama',
+        heldSince: null,
+      }).eq('id', p.cylinderMasukId);
+      if (errTabung) throw new Error(`Gagal memperbarui tabung: ${errTabung.message}`);
+
+      const txTerima: Transaction = {
+        id: `t-antri-masuk-${Date.now()}`,
+        cylinderId: p.cylinderMasukId,
+        memberId: p.memberId,
+        type: 'RETURN',
+        date: p.tanggal,
+      };
+      transaksiBaru.push(txTerima);
+      kait.transaksiTerimaId = txTerima.id;
+    }
+
+    if (p.bayarSekarang && p.bayarSekarang.jumlah > 0) {
+      const txBayar = barisBayarPesanan(pesanan, p.bayarSekarang, p.tanggal);
+      transaksiBaru.push(txBayar);
+      kait.transaksiBayarId = txBayar.id;
+    }
+
+    if (transaksiBaru.length > 0) {
+      const { error: errTx } = await supabase.from('transactions').insert(transaksiBaru);
+      if (errTx) throw new Error(`Gagal mencatat transaksi: ${errTx.message}`);
+
+      const { error: errKait } = await supabase.from('gas_orders').update(kait).eq('id', id);
+      if (errKait) throw new Error(`Gagal menyambungkan transaksi ke pesanan: ${errKait.message}`);
+    }
+
+    setGasOrders(prev => [...prev, { ...pesanan, ...kait }]);
+    setTransactions(prev => [...prev, ...transaksiBaru]);
+
+    if (p.jenis === 'TUKAR_BESAR' && p.cylinderMasukId) {
+      setCylinders(prev => prev.map(c => c.id === p.cylinderMasukId
+        ? { ...c, status: CylinderStatus.EmptyRefill, currentHolder: undefined, lastLocation: 'Gudang Utama', heldSince: null }
+        : c));
+    }
+  };
+
+  /**
+   * Pembayaran yang datang belakangan, saat isinya masih belum diserahkan.
+   *
+   * Tanggalnya diminta ke petugas, bukan diambil dari jam sekarang: pelanggan sering
+   * membayar saat mampir dan barisnya baru dicatat kemudian, dan seluruh gunanya
+   * memisahkan uang dari barang adalah supaya tanggal uangnya benar.
+   */
+  const handleBayarPesanan = async (p: BayarPesananPayload) => {
+    const pesanan = gasOrders.find(o => o.id === p.pesananId);
+    if (!pesanan) throw new Error('Pesanan tidak ditemukan.');
+    if (pesanan.transaksiBayarId) throw new Error('Pesanan ini sudah punya catatan pembayaran.');
+
+    const tx = barisBayarPesanan(pesanan, { jumlah: p.jumlah, metodeBayar: p.metodeBayar }, p.tanggal);
+
+    const { error } = await supabase.from('transactions').insert(tx);
+    if (error) throw new Error(`Gagal mencatat pembayaran: ${error.message}`);
+
+    // Harga ikut disamakan dengan yang benar-benar dibayar -- sebelum ini isinya
+    // taksiran, dan taksiran yang tertinggal berbeda dari nominal yang tercatat cuma
+    // menimbulkan pertanyaan yang tidak ada jawabannya.
+    const kait = { transaksiBayarId: tx.id, harga: p.jumlah };
+    const { error: errKait } = await supabase.from('gas_orders').update(kait).eq('id', p.pesananId);
+    if (errKait) throw new Error(`Gagal menyambungkan pembayaran ke pesanan: ${errKait.message}`);
+
+    setTransactions(prev => [...prev, tx]);
+    setGasOrders(prev => prev.map(o => (o.id === p.pesananId ? { ...o, ...kait } : o)));
+  };
+
+  /**
+   * Menyerahkan isi -- pesanannya selesai.
+   *
+   * Baris barangnya bernominal nol. Uangnya punya barisnya sendiri, dan kalau memang
+   * sudah dibayar sebelumnya, hari ini tidak ada uang yang dicatat sama sekali.
+   */
+  const handleSerahkanPesanan = async (p: SerahPesananPayload) => {
+    const pesanan = gasOrders.find(o => o.id === p.pesananId);
+    if (!pesanan) throw new Error('Pesanan tidak ditemukan.');
+
+    const date = new Date().toISOString();
+
+    // Penutupan status dijadikan penjaga, bukan sekadar penanda: dua petugas yang
+    // menekan Serahkan bersamaan akan menyerahkan dua tabung untuk satu pesanan.
+    // Yang kalah balapan tidak mendapat baris apa pun dan berhenti di sini, sebelum
+    // ada satu pun transaksi tertulis.
+    const { data: terkunci, error: errKunci } = await supabase.from('gas_orders')
+      .update({ status: 'SELESAI', tanggalSelesai: date })
+      .eq('id', p.pesananId)
+      .eq('status', 'MENUNGGU')
+      .select();
+    if (errKunci) throw new Error(`Gagal menutup pesanan: ${errKunci.message}`);
+    if (!terkunci || terkunci.length === 0) {
+      throw new Error('Pesanan ini sudah diselesaikan atau dibatalkan lebih dulu.');
+    }
+
+    const member = pesanan.memberId ? members.find(m => m.id === pesanan.memberId) : undefined;
+    const transaksiBaru: Transaction[] = [];
+    const kait: Partial<GasOrder> = { status: 'SELESAI', tanggalSelesai: date };
+
+    if (pesanan.jenis === 'TUKAR_BESAR' && p.cylinderKeluarId && pesanan.memberId) {
+      const { error: errTabung } = await supabase.from('cylinders').update({
+        status: CylinderStatus.Rented,
+        currentHolder: pesanan.memberId,
+        lastLocation: member?.companyName || 'Pelanggan',
+        heldSince: date.slice(0, 10),
+      }).eq('id', p.cylinderKeluarId);
+      if (errTabung) throw new Error(`Gagal memperbarui tabung: ${errTabung.message}`);
+
+      const txSerah: Transaction = {
+        id: `t-antri-serah-${Date.now()}`,
+        cylinderId: p.cylinderKeluarId,
+        memberId: pesanan.memberId,
+        type: 'RENTAL_OUT',
+        date,
+      };
+      transaksiBaru.push(txSerah);
+      kait.cylinderKeluarId = p.cylinderKeluarId;
+      kait.transaksiSerahId = txSerah.id;
+    }
+
+    if (p.bayar && p.bayar.jumlah > 0 && !pesanan.transaksiBayarId) {
+      const txBayar = barisBayarPesanan(pesanan, p.bayar, date);
+      transaksiBaru.push(txBayar);
+      kait.transaksiBayarId = txBayar.id;
+      kait.harga = p.bayar.jumlah;
+    }
+
+    if (transaksiBaru.length > 0) {
+      const { error: errTx } = await supabase.from('transactions').insert(transaksiBaru);
+      if (errTx) throw new Error(`Gagal mencatat transaksi: ${errTx.message}`);
+    }
+
+    // Bon dinaikkan setelah barisnya tersimpan, alasan yang sama seperti
+    // handleTambahBon: angka bon tanpa asal-usul lebih sulit dibereskan daripada
+    // tagihan yang belum terhitung.
+    if (p.bayar?.bon && p.bayar.jumlah > 0 && member) {
+      const newDebt = (member.totalDebt || 0) + p.bayar.jumlah;
+      const { error: errBon } = await supabase.from('members')
+        .update({ totalDebt: newDebt })
+        .eq('id', member.id);
+      if (errBon) throw new Error(`Gagal memperbarui bon: ${errBon.message}`);
+      setMembers(prev => prev.map(m => (m.id === member.id ? { ...m, totalDebt: newDebt } : m)));
+    }
+
+    const { error: errKait } = await supabase.from('gas_orders').update(kait).eq('id', p.pesananId);
+    if (errKait) throw new Error(`Gagal menyambungkan transaksi ke pesanan: ${errKait.message}`);
+
+    setGasOrders(prev => prev.map(o => (o.id === p.pesananId ? { ...o, ...kait } : o)));
+    setTransactions(prev => [...prev, ...transaksiBaru]);
+
+    if (p.cylinderKeluarId && pesanan.memberId) {
+      setCylinders(prev => prev.map(c => c.id === p.cylinderKeluarId
+        ? {
+            ...c,
+            status: CylinderStatus.Rented,
+            currentHolder: pesanan.memberId!,
+            lastLocation: member?.companyName || 'Pelanggan',
+            heldSince: date.slice(0, 10),
+          }
+        : c));
+    }
+  };
+
+  /**
+   * Membatalkan pesanan beserta seluruh bagiannya.
+   *
+   * Dikerjakan fungsi batalkan_pesanan() di database, bukan di sini: satu pesanan bisa
+   * menyentuh gas_orders, cylinders, transactions, dan members sekaligus. Menandai
+   * pesanannya batal tanpa membalik sisanya meninggalkan tabung yang tercatat di
+   * gudang padahal sudah dikembalikan ke pelanggan.
+   */
+  const handleBatalkanPesanan = async (id: string, alasan: string) => {
+    const { error } = await supabase.rpc('batalkan_pesanan', { p_id: id, p_alasan: alasan });
+    if (error) throw new Error(error.message);
+
+    await fetchData();
+  };
+
+  /**
    * Kas harian: belanja operasional (EXPENSE) dan penjualan lepas (INCOME).
    *
    * Keduanya satu handler karena bentuknya memang satu -- tidak menyentuh tabung,
@@ -1121,6 +1393,7 @@ const App: React.FC = () => {
               members={members}
               stations={refillStations}
               tariffs={tariffs}
+              gasOrders={gasOrders}
             />
           } />
           <Route path="/inventory" element={
@@ -1139,6 +1412,18 @@ const App: React.FC = () => {
               members={members}
               transactions={transactions}
               onSubmit={handleGasExchange}
+            />
+          } />
+          <Route path="/antrian" element={
+            <AntrianIsiView
+              orders={gasOrders}
+              members={members}
+              cylinders={cylinders}
+              tariffs={tariffs}
+              onBuat={handleBuatPesanan}
+              onBayar={handleBayarPesanan}
+              onSerahkan={handleSerahkanPesanan}
+              onBatalkan={handleBatalkanPesanan}
             />
           } />
           <Route path="/kas" element={
@@ -1215,6 +1500,7 @@ const App: React.FC = () => {
                 transactions={transactions}
                 cylinders={cylinders}
                 tariffs={tariffs}
+                gasOrders={gasOrders}
                 onAddMember={handleAddMember}
                 onUpdateMember={handleUpdateMember}
                 onDeleteMember={handleDeleteMember}

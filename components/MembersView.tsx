@@ -1,8 +1,9 @@
 ﻿import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Member, MemberPrice, Transaction, Cylinder, MemberStatus, RentalTariff } from '../types';
+import { Member, MemberPrice, Transaction, Cylinder, GasOrder, MemberStatus, RentalTariff } from '../types';
 import { labelStatusAnggota, labelStatusTabung, labelJenisTransaksi, formatTanggal } from '../labels';
 import { supabase } from '../lib/supabase';
 import { HARI_MASA_TUNGGU, RingkasanHolding, hitungSemuaHolding, hitungStatusMasaTunggu } from '../lib/memberExit';
+import { JENIS_PESANAN, pesananTertunda } from '../lib/antrianIsi';
 import { cariDiKolom } from '../lib/cari';
 
 interface MembersViewProps {
@@ -11,6 +12,7 @@ interface MembersViewProps {
     transactions: Transaction[];
     cylinders: Cylinder[];
     tariffs: RentalTariff[];
+    gasOrders: GasOrder[];
     onAddMember: (member: Member) => void;
     onUpdateMember: (member: Member) => void;
     onDeleteMember: (id: string) => void;
@@ -41,6 +43,7 @@ const MembersView: React.FC<MembersViewProps> = ({
     transactions,
     cylinders,
     tariffs,
+    gasOrders,
     onAddMember,
     onUpdateMember,
     onDeleteMember,
@@ -149,6 +152,13 @@ const MembersView: React.FC<MembersViewProps> = ({
         [cylinders, transactions, tariffs, selectedMemberId]);
 
     const memberHoldings = ringkasanHolding.tabungBerkode;
+
+    // Pesanan yang isinya belum diserahkan -- kebalikan dari barang di atas: ini yang
+    // masih jadi utang TOKO. Sengaja tidak digabungkan ke ringkasanHolding, karena
+    // hitungan itu menjawab pertanyaan yang berlawanan arah.
+    const pesananBelumSelesai = useMemo(
+        () => (selectedMemberId ? pesananTertunda(gasOrders, selectedMemberId) : []),
+        [gasOrders, selectedMemberId]);
 
     const statusMasaTunggu = useMemo(
         () => selectedMember?.exitRequestDate ? hitungStatusMasaTunggu(selectedMember.exitRequestDate) : null,
@@ -277,8 +287,13 @@ const MembersView: React.FC<MembersViewProps> = ({
     // Pencairan deposit hanya lolos tanpa pernyataan kalau masa tunggu sudah lewat
     // DAN tidak ada barang tersisa. Tanggal pengajuan yang tidak tercatat dihitung
     // sebagai belum lewat -- tidak ada bukti, tidak ada kelonggaran.
-    const exitPerluPernyataan = ringkasanHolding.totalBarang > 0;
-    const refundPerluPernyataan = ringkasanHolding.totalBarang > 0 || !statusMasaTunggu?.sudahLewat;
+    //
+    // Pesanan yang isinya belum diserahkan ikut menuntut pernyataan: pelanggan yang
+    // keluar sementara toko masih berutang isi kepadanya tidak akan pernah menagih
+    // lewat sistem ini lagi.
+    const exitPerluPernyataan = ringkasanHolding.totalBarang > 0 || pesananBelumSelesai.length > 0;
+    const refundPerluPernyataan =
+        ringkasanHolding.totalBarang > 0 || pesananBelumSelesai.length > 0 || !statusMasaTunggu?.sudahLewat;
 
     // -- Member Price Handlers --
     const handleOpenAddPrice = () => {
@@ -905,6 +920,8 @@ const MembersView: React.FC<MembersViewProps> = ({
 
                             <RingkasanBarangDipegang ringkasan={ringkasanHolding} />
 
+                            <PesananBelumDiserahkan pesanan={pesananBelumSelesai} />
+
                             {(selectedMember.totalDebt || 0) > 0 && (
                                 <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-3">
                                     Catatan: pelanggan ini masih punya utang {formatIDR(selectedMember.totalDebt)}. Utang tidak menghalangi pengajuan keluar, tapi sebaiknya diselesaikan sebelum deposit dicairkan.
@@ -976,6 +993,8 @@ const MembersView: React.FC<MembersViewProps> = ({
 
                             <RingkasanBarangDipegang ringkasan={ringkasanHolding} />
 
+                            <PesananBelumDiserahkan pesanan={pesananBelumSelesai} />
+
                             {(selectedMember.totalDebt || 0) > 0 && (
                                 <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-3">
                                     Catatan: pelanggan ini masih punya utang {formatIDR(selectedMember.totalDebt)}. Pencairan deposit di sini tidak memotong utang tersebut.
@@ -1012,6 +1031,44 @@ const MembersView: React.FC<MembersViewProps> = ({
  * pengajuan keluar dan modal pencairan deposit. Rinci per barang supaya admin
  * bisa mencocokkannya satu per satu dengan yang benar-benar ada di gudang.
  */
+/**
+ * Pesanan yang isinya belum diserahkan -- utang toko, bukan utang pelanggan.
+ *
+ * Tidak ditampilkan sama sekali kalau tidak ada, berbeda dari RingkasanBarangDipegang
+ * yang selalu memberi kabar baik. Yang kosong di sini memang keadaan biasa; membuat
+ * baris hijau untuk setiap pelanggan yang tidak punya pesanan cuma menambah bacaan.
+ */
+const PesananBelumDiserahkan: React.FC<{ pesanan: GasOrder[] }> = ({ pesanan }) => {
+    if (pesanan.length === 0) return null;
+
+    return (
+        <div className="bg-violet-50 border border-violet-200 rounded-lg p-3 space-y-2">
+            <div className="flex items-start gap-2">
+                <span className="material-icons text-violet-600 text-lg">pending_actions</span>
+                <div>
+                    <p className="text-sm font-semibold text-violet-800">
+                        Toko masih berutang isi: {pesanan.length} pesanan belum diserahkan
+                    </p>
+                    <p className="text-xs text-violet-700">
+                        Selesaikan atau batalkan dulu di halaman Antrian Isi — setelah pelanggan
+                        keluar, tidak ada lagi yang menagihnya.
+                    </p>
+                </div>
+            </div>
+            <ul className="space-y-1">
+                {pesanan.map(p => (
+                    <li key={p.id} className="text-xs text-gray-700 bg-white border border-violet-100 rounded px-2 py-1 flex justify-between gap-2">
+                        <span className="font-medium">{JENIS_PESANAN[p.jenis] || p.jenis}</span>
+                        <span className="text-gray-500">
+                            {p.gasType || '-'} {p.size || ''} • masuk {formatTanggal(p.tanggalMasuk)}
+                        </span>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+};
+
 const RingkasanBarangDipegang: React.FC<{ ringkasan: RingkasanHolding }> = ({ ringkasan }) => {
     if (ringkasan.totalBarang === 0) {
         return (

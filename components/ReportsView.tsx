@@ -345,6 +345,9 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           case 'CYLINDER_SWAP': return { title: `Tukar Tabung ${code}`, subtitle: t.description || 'Ditukar pabrik', icon: 'swap_horiz', color: 'bg-amber-100 text-amber-600', badge: 'TUKAR TABUNG' };
           case 'EXPENSE': return { title: t.description || 'Biaya Operasional', subtitle: 'Belanja operasional', icon: 'receipt_long', color: 'bg-rose-100 text-rose-600', badge: 'BIAYA' };
           case 'INCOME': return { title: t.description || 'Penjualan Lain', subtitle: 'Penjualan lepas', icon: 'trending_up', color: 'bg-green-100 text-green-600', badge: 'JUAL' };
+          // Barangnya belum tentu keluar pada tanggal ini -- itu justru gunanya jenis
+          // ini ada -- jadi subtitle-nya menyebut keadaan pesanannya, bukan tabung.
+          case 'ORDER_PAYMENT': return { title: t.description || 'Pembayaran Pesanan', subtitle: t.paymentStatus === 'UNPAID' ? 'Antrian isi, dibon' : 'Antrian isi', icon: 'pending_actions', color: 'bg-violet-100 text-violet-600', badge: 'PESANAN' };
           default: return { title: 'Tidak diketahui', subtitle: '', icon: 'help', color: 'bg-gray-100', badge: 'LAIN' };
       }
   };
@@ -363,6 +366,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           case 'CYLINDER_SWAP': return 'bg-amber-100 text-amber-800';
           case 'EXPENSE': return 'bg-rose-100 text-rose-800';
           case 'INCOME': return 'bg-green-100 text-green-800';
+          case 'ORDER_PAYMENT': return 'bg-violet-100 text-violet-800';
           default: return 'bg-gray-100 text-gray-800';
       }
   };
@@ -869,13 +873,17 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                               <p className="text-sm font-bold text-gray-800">
                                                   {t.type === 'GAS_EXCHANGE'
                                                       ? `Tukar Isi - ${member?.companyName || 'pembeli lepas'}`
-                                                      : t.type === 'INCOME'
-                                                          ? `Penjualan Lain - ${t.description || 'tanpa keterangan'}`
-                                                          : t.type === 'EXPENSE'
-                                                              ? `Biaya Operasional - ${t.description || 'tanpa keterangan'}`
-                                                              : isIncome
-                                                                  ? `Pendapatan Sewa - ${member?.companyName || 'Tidak diketahui'}`
-                                                                  : `Biaya Isi Ulang - ${cyl?.gasType}`}
+                                                      : t.type === 'ORDER_PAYMENT'
+                                                          // Keterangannya sudah memuat jenis pesanan dan nama pembelinya,
+                                                          // jadi memberinya awalan lagi cuma mengulang kata yang sama.
+                                                          ? t.description || `Pembayaran Pesanan - ${member?.companyName || 'pembeli lepas'}`
+                                                          : t.type === 'INCOME'
+                                                              ? `Penjualan Lain - ${t.description || 'tanpa keterangan'}`
+                                                              : t.type === 'EXPENSE'
+                                                                  ? `Biaya Operasional - ${t.description || 'tanpa keterangan'}`
+                                                                  : isIncome
+                                                                      ? `Pendapatan Sewa - ${member?.companyName || 'Tidak diketahui'}`
+                                                                      : `Biaya Isi Ulang - ${cyl?.gasType}`}
                                               </p>
                                               <p className="text-xs text-gray-500">
                                                   {new Date(t.date).toLocaleDateString('id-ID')} • {sebutanBarang(t, cyl?.serialCode)}
@@ -1022,6 +1030,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                       <option value="DEPOSIT_REFUND">Pengembalian Deposit</option>
                       <option value="DELIVERY">Pengiriman</option>
                       <option value="GAS_EXCHANGE">Tukar Isi</option>
+                      <option value="ORDER_PAYMENT">Pembayaran Pesanan</option>
                       <option value="CYLINDER_SWAP">Tukar Tabung Pabrik</option>
                       <option value="INCOME">Penjualan Lain</option>
                       <option value="EXPENSE">Biaya Operasional</option>

@@ -48,6 +48,10 @@ export const JENIS_TRANSAKSI: Record<string, string> = {
   // Sejalan dengan itu: sewa dan tukar isi juga pemasukan, jadi labelnya menyebut
   // apa yang membedakannya -- barang yang dijual putus, bukan disewakan.
   INCOME: 'Penjualan Lain',
+  // Uang untuk pesanan di Antrian Isi. Disebut "pembayaran", bukan "penjualan",
+  // karena tanggalnya belum tentu tanggal barangnya diserahkan -- itu justru
+  // seluruh alasan jenis ini ada.
+  ORDER_PAYMENT: 'Pembayaran Pesanan',
 };
 
 export const STATUS_BAYAR: Record<string, string> = {

@@ -2,6 +2,7 @@ import {
   Cylinder,
   CylinderSize,
   CylinderStatus,
+  GasOrder,
   GasType,
   Member,
   MemberStatus,
@@ -9,6 +10,7 @@ import {
   Transaction,
 } from '../types';
 import { formatIDR } from '../labels';
+import { AMBANG_PESANAN_LAMA, pesananLama, pesananTertunda } from './antrianIsi';
 import { tarifCurahAktif, totalRegulatorBeredar } from './bulkStock';
 import { hitungSemuaHolding, hitungStatusMasaTunggu } from './memberExit';
 
@@ -73,7 +75,8 @@ export function hitungAntrianTindakan(
   cylinders: Cylinder[],
   transactions: Transaction[],
   members: Member[],
-  tariffs: RentalTariff[]
+  tariffs: RentalTariff[],
+  gasOrders: GasOrder[] = []
 ): ItemTindakan[] {
   const antrian: ItemTindakan[] = [];
 
@@ -102,6 +105,36 @@ export function hitungAntrianTindakan(
       detail: masihPegang.map(m => m.companyName).join(', '),
       tujuan: '/members',
       nada: 'bahaya',
+    });
+  }
+
+  // Pelanggan yang mau keluar padahal toko masih berutang isi kepadanya.
+  //
+  // Pemeriksaan "masih memegang barang" di atas tidak menangkap ini, dan justru
+  // sebaliknya: antara tabung kosongnya masuk dan isinya diserahkan, barang di
+  // tangan pelanggan malah berkurang. Tanpa baris ini ia bisa keluar dengan bersih
+  // padahal masih punya hak yang belum ditunaikan.
+  const keluarBerpesanan = menungguKeluar.filter(m => pesananTertunda(gasOrders, m.id).length > 0);
+  if (keluarBerpesanan.length > 0) {
+    antrian.push({
+      id: 'keluar-berpesanan',
+      ikon: 'pending_actions',
+      teks: `${keluarBerpesanan.length} pelanggan mengajukan keluar tapi isinya belum diserahkan`,
+      detail: keluarBerpesanan.map(m => m.companyName).join(', '),
+      tujuan: '/antrian',
+      nada: 'bahaya',
+    });
+  }
+
+  const antriTelantar = pesananLama(gasOrders);
+  if (antriTelantar.length > 0) {
+    antrian.push({
+      id: 'antrian-telantar',
+      ikon: 'schedule',
+      teks: `${antriTelantar.length} pesanan menunggu isi lebih dari ${AMBANG_PESANAN_LAMA} hari`,
+      detail: antriTelantar.map(o => o.namaPembeli).join(', '),
+      tujuan: '/antrian',
+      nada: 'peringatan',
     });
   }
 
