@@ -52,6 +52,10 @@ export const JENIS_TRANSAKSI: Record<string, string> = {
   // karena tanggalnya belum tentu tanggal barangnya diserahkan -- itu justru
   // seluruh alasan jenis ini ada.
   ORDER_PAYMENT: 'Pembayaran Pesanan',
+  // Bon yang dihapus karena salah catat. Disebut "dihapus", bukan "dilunasi" --
+  // tidak ada uang yang berpindah, dan menyamarkannya sebagai pelunasan persis
+  // kekeliruan yang jenis ini ada untuk dihindari.
+  DEBT_REMOVED: 'Bon Dihapus',
 };
 
 export const STATUS_BAYAR: Record<string, string> = {

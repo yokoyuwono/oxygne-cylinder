@@ -23,6 +23,20 @@ export const bolehLihatKeuanganPenuh = (peran?: UserRole) => peran === UserRole.
 export const bolehKelolaPengguna = (peran?: UserRole) => peran === UserRole.Admin;
 
 /**
+ * Menghapus bon yang salah catat.
+ *
+ * Tidak diberi kelonggaran "hari ini" seperti pembatalan transaksi. Salah ketik saat
+ * mencatat penjualan ketahuan dalam hitungan menit, jadi Operator boleh membetulkannya
+ * sendiri; menghapus bon menghilangkan tagihan atas nama orang tanpa ada uang yang
+ * berpindah, dan tidak ada jendela waktu yang membuatnya aman.
+ *
+ * Berbeda dari predikat lain di berkas ini, yang satu ini BUKAN sekadar pembatasan
+ * tampilan: hapus_bon() dan hapus_baris_bon() di database memeriksa ulang perannya
+ * sendiri dan menolak siapa pun selain Administrator.
+ */
+export const bolehHapusBon = (peran?: UserRole) => peran === UserRole.Admin;
+
+/**
  * Jenis transaksi yang punya jalur pembalikan lengkap di batalkan_transaksi().
  *
  * Sisanya sengaja tidak ditawarkan tombolnya: isi ulang, pengiriman, pembayaran

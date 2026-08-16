@@ -419,6 +419,31 @@ const App: React.FC = () => {
     setMembers(prev => prev.map(m => m.id === memberId ? { ...m, totalDebt: newDebt } : m));
   };
 
+  /**
+   * Menghapus bon yang salah catat -- seluruh sisa milik satu pelanggan.
+   *
+   * Seluruh kerjanya di fungsi hapus_bon() di database, bukan di sini. Dua alasan
+   * yang keduanya mengikat: penghapusan ini menyentuh members dan banyak baris
+   * transactions sekaligus, dan yang lebih penting, penjagaan "hanya Administrator"
+   * harus diperiksa di tempat yang tidak bisa dilewati. Policy RLS memberi setiap
+   * akun yang login akses penuh ke kedua tabel itu, jadi memeriksanya di browser
+   * cuma menyembunyikan tombol, bukan menutup pintunya.
+   */
+  const handleHapusBon = async (memberId: string, alasan: string) => {
+    const { error } = await supabase.rpc('hapus_bon', { p_member_id: memberId, p_alasan: alasan });
+    if (error) throw new Error(error.message);
+
+    await fetchData();
+  };
+
+  /** Sama, tapi hanya satu baris tagihan. */
+  const handleHapusBarisBon = async (transactionId: string, alasan: string) => {
+    const { error } = await supabase.rpc('hapus_baris_bon', { p_id: transactionId, p_alasan: alasan });
+    if (error) throw new Error(error.message);
+
+    await fetchData();
+  };
+
   const handleMemberExitRequest = async (memberId: string) => {
     const updates = { status: MemberStatus.Pending_Exit, exitRequestDate: new Date().toISOString() };
     await supabase.from('members').update(updates).eq('id', memberId);
@@ -1442,10 +1467,13 @@ const App: React.FC = () => {
             <BonView
               members={members}
               transactions={transactions}
+              role={currentUser.role}
               onBayar={(p: BayarBonPayload) =>
                 handlePayDebt(p.memberId, p.jumlah, p.billIds, { date: p.tanggal, description: p.catatan })}
               onTambah={(p: TambahBonPayload) =>
                 handleTambahBon(p.memberId, p.jumlah, p.tanggal)}
+              onHapusBon={handleHapusBon}
+              onHapusBaris={handleHapusBarisBon}
             />
           } />
           <Route path="/rental" element={

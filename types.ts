@@ -258,8 +258,13 @@ export interface Transaction {
    * membatalkannya tanpa membalik apa pun, dengan alasan "botol masuk satu, keluar
    * satu" -- justru asumsi yang tidak berlaku untuk pesanan yang barangnya belum
    * diserahkan.
+   *
+   * DEBT_REMOVED adalah jejak penghapusan bon yang salah catat. Selalu bernominal
+   * nol supaya tidak pernah ikut terhitung di rekap mana pun -- nominal yang dihapus
+   * ditulis di keterangannya, bukan di cost. Yang dibawanya cuma pertanggungjawaban:
+   * siapa menghapus berapa, kapan, dan kenapa.
    */
-  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEBT_ADD' | 'DEPOSIT_REFUND' | 'DELIVERY' | 'GAS_EXCHANGE' | 'CYLINDER_SWAP' | 'EXPENSE' | 'INCOME' | 'ORDER_PAYMENT';
+  type: 'RENTAL_OUT' | 'RETURN' | 'REFILL_OUT' | 'REFILL_IN' | 'DEBT_PAYMENT' | 'DEBT_ADD' | 'DEPOSIT_REFUND' | 'DELIVERY' | 'GAS_EXCHANGE' | 'CYLINDER_SWAP' | 'EXPENSE' | 'INCOME' | 'ORDER_PAYMENT' | 'DEBT_REMOVED';
   date: string;
   rentalDuration?: number; // Days held (relevant for RETURN type)
   cost?: number; // Revenue only -- rental fee + gas + regulator. Deposit is NOT included.

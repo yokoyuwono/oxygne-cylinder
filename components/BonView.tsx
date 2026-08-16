@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { Member, Transaction } from '../types';
+import { Member, Transaction, UserRole } from '../types';
 import { formatIDR, formatTanggal, labelJenisTransaksi } from '../labels';
 import { hariIni } from '../lib/laporanHarian';
+import { bolehHapusBon } from '../lib/peran';
 import { usePaginasi } from '../lib/usePaginasi';
 import Paginasi from './Paginasi';
 import {
@@ -31,8 +32,13 @@ export interface TambahBonPayload {
 interface BonViewProps {
   members: Member[];
   transactions: Transaction[];
+  role?: UserRole;
   onBayar: (payload: BayarBonPayload) => Promise<void>;
   onTambah: (payload: TambahBonPayload) => Promise<void>;
+  /** Seluruh sisa bon satu pelanggan. Hanya Administrator; database memeriksa ulang. */
+  onHapusBon: (memberId: string, alasan: string) => Promise<void>;
+  /** Satu baris tagihan saja. */
+  onHapusBaris: (transactionId: string, alasan: string) => Promise<void>;
 }
 
 const inputClass = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none';
@@ -59,13 +65,18 @@ const adaTelepon = (nomor?: string) => Boolean(nomor && nomor.trim() && nomor.tr
  * nominal; tombol "Lunasi" hanya mengisikan sisa bonnya ke kolom yang sama supaya
  * kasus paling sering tidak perlu mengetik angka panjang yang rawan salah.
  */
-const BonView: React.FC<BonViewProps> = ({ members, transactions, onBayar, onTambah }) => {
+const BonView: React.FC<BonViewProps> = ({
+  members, transactions, role, onBayar, onTambah, onHapusBon, onHapusBaris,
+}) => {
   const [kataKunci, setKataKunci] = useState('');
   const [urutan, setUrutan] = useState<UrutanBon>('terbesar');
   const [dibuka, setDibuka] = useState<string | null>(null);
   const [bayar, setBayar] = useState<BarisBon | null>(null);
   const [tambah, setTambah] = useState(false);
+  const [hapus, setHapus] = useState<RencanaHapus | null>(null);
   const [feedback, setFeedback] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+
+  const bolehHapus = bolehHapusBon(role);
 
   const ringkasan = useMemo(() => daftarBon(members, transactions), [members, transactions]);
 
@@ -158,8 +169,22 @@ const BonView: React.FC<BonViewProps> = ({ members, transactions, onBayar, onTam
                     key={b.member.id}
                     baris={b}
                     terbuka={dibuka === b.member.id}
+                    bolehHapus={bolehHapus}
                     onBuka={() => setDibuka(dibuka === b.member.id ? null : b.member.id)}
                     onBayar={() => setBayar(b)}
+                    onHapusSemua={() => setHapus({
+                      ruang: 'semua',
+                      id: b.member.id,
+                      nama: b.member.companyName,
+                      nominal: b.sisa,
+                    })}
+                    onHapusBaris={t => setHapus({
+                      ruang: 'baris',
+                      id: t.id,
+                      nama: b.member.companyName,
+                      nominal: t.cost || 0,
+                      keterangan: `${labelJenisTransaksi(t.type)} · ${formatTanggal(t.date)}`,
+                    })}
                   />
                 ))}
               </tbody>
@@ -200,6 +225,16 @@ const BonView: React.FC<BonViewProps> = ({ members, transactions, onBayar, onTam
           onSelesai={selesaiBayar}
         />
       )}
+
+      {hapus && (
+        <FormHapus
+          rencana={hapus}
+          onTutup={() => setHapus(null)}
+          onSimpan={alasan =>
+            hapus.ruang === 'semua' ? onHapusBon(hapus.id, alasan) : onHapusBaris(hapus.id, alasan)}
+          onSelesai={selesaiBayar}
+        />
+      )}
     </div>
   );
 };
@@ -227,9 +262,12 @@ const Kartu: React.FC<{
 const BarisPelanggan: React.FC<{
   baris: BarisBon;
   terbuka: boolean;
+  bolehHapus: boolean;
   onBuka: () => void;
   onBayar: () => void;
-}> = ({ baris, terbuka, onBuka, onBayar }) => {
+  onHapusSemua: () => void;
+  onHapusBaris: (tagihan: Transaction) => void;
+}> = ({ baris, terbuka, bolehHapus, onBuka, onBayar, onHapusSemua, onHapusBaris }) => {
   const menunggak = (baris.umurHari ?? 0) >= AMBANG_MENUNGGAK;
 
   return (
@@ -268,13 +306,27 @@ const BarisPelanggan: React.FC<{
           )}
         </td>
         <td className="px-4 py-3 text-right">
-          <button
-            onClick={onBayar}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold"
-          >
-            <span className="material-icons text-sm">payments</span>
-            Catat Pembayaran
-          </button>
+          <div className="inline-flex items-center gap-1.5">
+            <button
+              onClick={onBayar}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold"
+            >
+              <span className="material-icons text-sm">payments</span>
+              Catat Pembayaran
+            </button>
+            {/* Ikon saja, tanpa tulisan: ini tindakan yang jarang dipakai dan tidak
+                boleh berlomba perhatian dengan tombol yang dipakai tiap hari. */}
+            {bolehHapus && (
+              <button
+                onClick={onHapusSemua}
+                title="Hapus bon ini karena salah catat"
+                aria-label={`Hapus bon ${baris.member.companyName}`}
+                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+              >
+                <span className="material-icons text-base">delete_outline</span>
+              </button>
+            )}
+          </div>
         </td>
       </tr>
 
@@ -296,6 +348,7 @@ const BarisPelanggan: React.FC<{
                   teks: labelJenisTransaksi(t.type),
                   nominal: t.cost || 0,
                   warna: 'text-gray-800',
+                  onHapus: bolehHapus ? () => onHapusBaris(t) : undefined,
                 }))}
               />
               <Rincian
@@ -321,7 +374,15 @@ const Rincian: React.FC<{
   judul: string;
   kosong: string;
   catatan?: string;
-  isi: { id: string; tanggal: string; teks: string; nominal: number; warna: string }[];
+  isi: {
+    id: string;
+    tanggal: string;
+    teks: string;
+    nominal: number;
+    warna: string;
+    /** Hanya diisi untuk tagihan, dan hanya kalau perannya Administrator. */
+    onHapus?: () => void;
+  }[];
 }> = ({ judul, kosong, catatan, isi }) => (
   <div>
     <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">{judul}</h3>
@@ -333,6 +394,20 @@ const Rincian: React.FC<{
               <span className="text-gray-500 text-xs whitespace-nowrap">{formatTanggal(r.tanggal)}</span>
               <span className="flex-1 text-gray-700 truncate">{r.teks}</span>
               <span className={`font-medium whitespace-nowrap ${r.warna}`}>{formatIDR(r.nominal)}</span>
+              {/* Selalu terlihat, bukan muncul saat hover. Tindakan yang merusak tidak
+                  boleh menuntut orang menemukannya lebih dulu, dan kendali yang hanya
+                  hadir saat hover tidak pernah sampai ke layar sentuh maupun pembaca
+                  layar. Warnanya yang diredam, bukan keberadaannya. */}
+              {r.onHapus && (
+                <button
+                  onClick={r.onHapus}
+                  title="Hapus tagihan ini karena salah catat"
+                  aria-label={`Hapus tagihan ${r.teks} ${formatIDR(r.nominal)}`}
+                  className="text-gray-300 hover:text-red-600 focus:text-red-600"
+                >
+                  <span className="material-icons text-base align-middle">delete_outline</span>
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -682,6 +757,137 @@ const FormTambah: React.FC<{
             >
               <span className="material-icons text-base">{busy ? 'hourglass_top' : 'save'}</span>
               {busy ? 'Menyimpan...' : 'Simpan Bon'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --------------------------------------------------------------------------- Form hapus
+
+/**
+ * Apa yang sedang akan dihapus.
+ *
+ * `id` berarti dua hal yang berbeda tergantung ruangnya -- id pelanggan untuk seluruh
+ * sisa bon, id transaksi untuk satu tagihan. Digabung begini karena dialognya memang
+ * satu: yang membedakan cuma kalimat peringatannya dan fungsi mana yang dipanggil.
+ */
+interface RencanaHapus {
+  ruang: 'semua' | 'baris';
+  id: string;
+  nama: string;
+  nominal: number;
+  keterangan?: string;
+}
+
+/**
+ * Menghapus bon yang salah catat.
+ *
+ * Alasannya wajib dan tanpa jalan pintas. Ini satu-satunya cara sisa bon bisa turun
+ * tanpa ada uang yang masuk, jadi tanpa kalimat yang menerangkannya, selisih antara
+ * catatan dan uang di laci tidak akan pernah bisa ditelusuri lagi.
+ *
+ * Nominalnya ditulis besar-besar, bukan disebut sambil lalu: yang paling mudah salah
+ * di sini adalah menghapus bon pelanggan yang keliru, dan angka itu yang paling cepat
+ * menyadarkan.
+ */
+const FormHapus: React.FC<{
+  rencana: RencanaHapus;
+  onTutup: () => void;
+  onSimpan: (alasan: string) => Promise<void>;
+  onSelesai: (pesan: string) => void;
+}> = ({ rencana, onTutup, onSimpan, onSelesai }) => {
+  const [alasan, setAlasan] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [galat, setGalat] = useState<string | null>(null);
+
+  const siap = alasan.trim().length > 0;
+  const semua = rencana.ruang === 'semua';
+
+  const simpan = async () => {
+    if (!siap || busy) return;
+
+    setBusy(true);
+    setGalat(null);
+    try {
+      await onSimpan(alasan.trim());
+      onSelesai(
+        semua
+          ? `Bon ${rencana.nama} sebesar ${formatIDR(rencana.nominal)} dihapus.`
+          : `Tagihan ${formatIDR(rencana.nominal)} atas nama ${rencana.nama} dihapus.`
+      );
+      onTutup();
+    } catch (e) {
+      setGalat(e instanceof Error ? e.message : 'Gagal menghapus bon.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-fade-in-up">
+        <div className="bg-red-600 px-6 py-4 flex justify-between items-center text-white">
+          <h3 className="font-bold flex items-center gap-2">
+            <span className="material-icons">delete_sweep</span>
+            {semua ? 'Hapus Bon Pelanggan' : 'Hapus Satu Tagihan'}
+          </h3>
+          <button onClick={onTutup} className="text-red-200 hover:text-white">
+            <span className="material-icons">close</span>
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div className="bg-gray-50 rounded-xl p-4">
+            <p className="font-bold text-gray-800">{rencana.nama}</p>
+            {rencana.keterangan && <p className="text-xs text-gray-500">{rencana.keterangan}</p>}
+            <p className="text-xs text-gray-500 uppercase font-bold mt-2">
+              {semua ? 'Sisa bon yang dihapus' : 'Nominal tagihan'}
+            </p>
+            <p className="text-2xl font-bold text-red-600">{formatIDR(rencana.nominal)}</p>
+          </div>
+
+          <p className="text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 leading-relaxed">
+            Ini untuk bon yang <strong>salah catat</strong> &mdash; salah nominal, salah pelanggan,
+            atau dobel. Tidak ada uang yang dianggap masuk dan tidak ada pengeluaran yang dicatat,
+            jadi laba bersih tidak berubah. Kalau bonnya nyata tapi tidak akan tertagih, catat
+            sebagai pengeluaran lewat Uang Keluar, bukan dihapus di sini.
+          </p>
+
+          <div>
+            <label className={labelClass} htmlFor="alasan-hapus">Alasan (wajib)</label>
+            <input
+              id="alasan-hapus"
+              type="text"
+              value={alasan}
+              onChange={e => setAlasan(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') simpan(); }}
+              className={inputClass}
+              placeholder="Dobel catat dengan nota 12 Agustus"
+              autoFocus
+            />
+            <p className="text-[11px] text-gray-400 mt-1">
+              Disimpan bersama nama Anda dan bisa dibaca lagi di Riwayat Aktivitas.
+            </p>
+          </div>
+
+          {galat && (
+            <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{galat}</p>
+          )}
+
+          <div className="flex justify-end gap-3 pt-1">
+            <button onClick={onTutup} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium">
+              Batal
+            </button>
+            <button
+              onClick={simpan}
+              disabled={!siap || busy}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold flex items-center gap-2"
+            >
+              <span className="material-icons text-base">{busy ? 'hourglass_top' : 'delete_outline'}</span>
+              {busy ? 'Menghapus...' : 'Hapus Bon'}
             </button>
           </div>
         </div>

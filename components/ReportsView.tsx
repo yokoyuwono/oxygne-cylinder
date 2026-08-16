@@ -348,6 +348,9 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           // Barangnya belum tentu keluar pada tanggal ini -- itu justru gunanya jenis
           // ini ada -- jadi subtitle-nya menyebut keadaan pesanannya, bukan tabung.
           case 'ORDER_PAYMENT': return { title: t.description || 'Pembayaran Pesanan', subtitle: t.paymentStatus === 'UNPAID' ? 'Antrian isi, dibon' : 'Antrian isi', icon: 'pending_actions', color: 'bg-violet-100 text-violet-600', badge: 'PESANAN' };
+          // Keterangannya sudah memuat nominal, pelanggan, pelaku, dan alasannya --
+          // barisnya memang tidak punya isi lain, dan itu yang perlu terbaca utuh.
+          case 'DEBT_REMOVED': return { title: t.description || 'Bon Dihapus', subtitle: 'Koreksi salah catat, bukan uang masuk', icon: 'delete_sweep', color: 'bg-slate-100 text-slate-600', badge: 'HAPUS BON' };
           default: return { title: 'Tidak diketahui', subtitle: '', icon: 'help', color: 'bg-gray-100', badge: 'LAIN' };
       }
   };
@@ -367,6 +370,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           case 'EXPENSE': return 'bg-rose-100 text-rose-800';
           case 'INCOME': return 'bg-green-100 text-green-800';
           case 'ORDER_PAYMENT': return 'bg-violet-100 text-violet-800';
+          case 'DEBT_REMOVED': return 'bg-slate-100 text-slate-800';
           default: return 'bg-gray-100 text-gray-800';
       }
   };
@@ -1031,6 +1035,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                       <option value="DELIVERY">Pengiriman</option>
                       <option value="GAS_EXCHANGE">Tukar Isi</option>
                       <option value="ORDER_PAYMENT">Pembayaran Pesanan</option>
+                      <option value="DEBT_REMOVED">Bon Dihapus</option>
                       <option value="CYLINDER_SWAP">Tukar Tabung Pabrik</option>
                       <option value="INCOME">Penjualan Lain</option>
                       <option value="EXPENSE">Biaya Operasional</option>
