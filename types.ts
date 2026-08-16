@@ -205,6 +205,16 @@ export interface Transaction {
   description?: string;
 
   /**
+   * Pos belanja untuk baris EXPENSE yang dicatat lewat tab Keuangan.
+   *
+   * Kosong untuk pengeluaran yang dicatat di halaman /kas dan untuk seluruh catatan
+   * lama -- rekap per pos memperlakukan yang kosong maupun yang tak dikenal sebagai
+   * "Lain-lain", jadi tidak ada baris yang hilang dari hitungan. Daftar posnya ada
+   * di lib/pengeluaran.ts.
+   */
+  category?: string;
+
+  /**
    * Penanda pembatalan. Transaksi yang salah catat dibatalkan, bukan dihapus --
    * ini catatan uang orang, jadi jejaknya ditahan.
    *

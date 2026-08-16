@@ -4,6 +4,7 @@ import { formatIDR, labelJenisTransaksi, labelStatusBayar } from '../labels';
 import { sebutanBarang } from '../lib/bulkStock';
 import { bolehBatalkanTransaksi, bolehLihatKeuanganPenuh } from '../lib/peran';
 import { barisPendapatan, barisPengeluaran, hariIni, hitungLaporanHarian, tanggalLokal } from '../lib/laporanHarian';
+import { KATEGORI_PENGELUARAN, PengeluaranPayload, rekapPengeluaranPerKategori } from '../lib/pengeluaran';
 import { usePaginasi } from '../lib/usePaginasi';
 import Paginasi from './Paginasi';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
@@ -15,6 +16,14 @@ interface ReportsViewProps {
   stations: RefillStation[];
   role?: UserRole;
   onBatalkanTransaksi?: (id: string, alasan: string) => Promise<void>;
+
+  /**
+   * Mencatat belanja operasional langsung dari tab Keuangan.
+   *
+   * Hanya jalur ini yang menanyakan pos belanja; halaman /kas tetap mencatat tanpa
+   * pos supaya jalur tercepat Operator tidak bertambah panjang.
+   */
+  onCatatPengeluaran?: (payload: PengeluaranPayload) => Promise<void>;
 }
 
 const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
@@ -83,7 +92,7 @@ const DeliveryManifestCard: React.FC<{ date: string, txs: Transaction[], petaTab
   );
 };
 
-const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, members, stations, role, onBatalkanTransaksi }) => {
+const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, members, stations, role, onBatalkanTransaksi, onCatatPengeluaran }) => {
   // Rekap menyeluruh -- total, tren bulanan, laba, peringkat pelanggan -- hanya untuk
   // Administrator. Peran lain melihat keuangan sehari demi sehari lewat tab Harian.
   const bolehRekapPenuh = bolehLihatKeuanganPenuh(role);
@@ -104,6 +113,16 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
   // -- New State for Logs --
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table');
   const [selectedType, setSelectedType] = useState<string>('ALL');
+
+  // -- Isian pencatatan pengeluaran (tab Keuangan) --
+  const [modalPengeluaran, setModalPengeluaran] = useState(false);
+  const [posBaru, setPosBaru] = useState(KATEGORI_PENGELUARAN[0].id);
+  const [keteranganBaru, setKeteranganBaru] = useState('');
+  const [tanggalBaru, setTanggalBaru] = useState(hariIni);
+  const [nominalBaru, setNominalBaru] = useState('');
+  const [sedangSimpan, setSedangSimpan] = useState(false);
+  const [pesanGagal, setPesanGagal] = useState('');
+  const [pesanBerhasil, setPesanBerhasil] = useState('');
 
   const BARIS_PER_HALAMAN = 25;
   const PENGIRIMAN_PER_HALAMAN = 20;
@@ -181,6 +200,10 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
   const totalIncome = incomeTransactions.reduce((sum, t) => sum + (t.cost || 0), 0);
   const totalExpenses = expenseTransactions.reduce((sum, t) => sum + (t.cost || 0), 0);
   const netProfit = totalIncome - totalExpenses;
+
+  // Pengeluaran dipecah per pos. Memakai predikat yang sama seperti totalExpenses di
+  // atas, jadi rinciannya selalu berjumlah persis sama dengan kartunya.
+  const rekapPos = useMemo(() => rekapPengeluaranPerKategori(transactions), [transactions]);
 
   // Monthly Trend Data
   const financialTrendData = useMemo(() => {
@@ -336,6 +359,41 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           case 'INCOME': return 'bg-green-100 text-green-800';
           default: return 'bg-gray-100 text-gray-800';
       }
+  };
+
+  const nominalPengeluaran = Number(nominalBaru) || 0;
+  const siapSimpan = keteranganBaru.trim().length > 0 && nominalPengeluaran > 0 && Boolean(tanggalBaru);
+
+  const tutupModalPengeluaran = () => {
+    setModalPengeluaran(false);
+    setPesanGagal('');
+  };
+
+  const simpanPengeluaran = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onCatatPengeluaran || !siapSimpan || sedangSimpan) return;
+
+    setPesanGagal('');
+    setSedangSimpan(true);
+    try {
+      await onCatatPengeluaran({
+        description: keteranganBaru.trim(),
+        amount: nominalPengeluaran,
+        date: new Date(tanggalBaru).toISOString(),
+        kategori: posBaru,
+      });
+
+      setModalPengeluaran(false);
+      setKeteranganBaru('');
+      setNominalBaru('');
+      setTanggalBaru(hariIni());
+      setPesanBerhasil(`Pengeluaran ${formatIDR(nominalPengeluaran)} tercatat.`);
+      setTimeout(() => setPesanBerhasil(''), 3500);
+    } catch (err) {
+      setPesanGagal(err instanceof Error ? err.message : 'Gagal menyimpan pengeluaran.');
+    } finally {
+      setSedangSimpan(false);
+    }
   };
 
   /** Baris ringkas untuk kartu di HP -- dipakai tabel Riwayat dan Laporan Harian. */
@@ -613,6 +671,30 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
       {/* TAB: FINANCIALS */}
       {activeTab === 'financials' && bolehRekapPenuh && (
           <div className="space-y-6 animate-fade-in">
+              {/* Pencatatan pengeluaran hidup di dalam guard tab ini, jadi ia ikut
+                  hilang sendiri untuk Operator tanpa perlu penjagaan kedua. */}
+              {onCatatPengeluaran && (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                          <h3 className="font-bold text-gray-800">Rekap Keuangan</h3>
+                          <p className="text-xs text-gray-500">Seluruh pemasukan dan pengeluaran yang tercatat.</p>
+                      </div>
+                      <button
+                          onClick={() => setModalPengeluaran(true)}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-colors"
+                      >
+                          <span className="material-icons text-lg">add</span>
+                          Catat Pengeluaran
+                      </button>
+                  </div>
+              )}
+
+              {pesanBerhasil && (
+                  <div className="px-4 py-3 rounded-xl text-sm font-medium border bg-green-50 text-green-700 border-green-100">
+                      {pesanBerhasil}
+                  </div>
+              )}
+
               {/* Summary Cards */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4">
@@ -644,6 +726,41 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                           <h3 className={`text-2xl font-bold ${netProfit >= 0 ? 'text-indigo-700' : 'text-orange-600'}`}>{formatIDR(netProfit)}</h3>
                       </div>
                   </div>
+              </div>
+
+              {/* Pengeluaran per Pos -- memecah kartu Total Pengeluaran di atas supaya
+                  terlihat ke mana uangnya, bukan cuma berapa. */}
+              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                      <h3 className="font-bold text-gray-800">Pengeluaran per Pos</h3>
+                      <span className="text-sm font-bold text-gray-500">{formatIDR(totalExpenses)}</span>
+                  </div>
+
+                  {rekapPos.length > 0 ? (
+                      <div className="space-y-3">
+                          {rekapPos.map(pos => (
+                              <div key={pos.id}>
+                                  <div className="flex items-center justify-between gap-3 mb-1.5">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                          <span className="material-icons text-base text-gray-400 shrink-0">{pos.ikon}</span>
+                                          <p className="text-sm text-gray-700 font-medium truncate">{pos.label}</p>
+                                      </div>
+                                      <div className="flex items-baseline gap-3 shrink-0">
+                                          <p className="text-sm font-bold text-gray-900">{formatIDR(pos.total)}</p>
+                                          <span className="text-xs text-gray-400 w-9 text-right">{pos.persen.toFixed(0)}%</span>
+                                      </div>
+                                  </div>
+                                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                      <div className="h-full bg-red-400 rounded-full" style={{ width: `${pos.persen}%` }} />
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                  ) : (
+                      <div className="h-24 flex items-center justify-center text-gray-400 text-sm">
+                          Belum ada pengeluaran tercatat.
+                      </div>
+                  )}
               </div>
 
               {/* Charts Row */}
@@ -740,6 +857,102 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                       )}
                   </div>
               </div>
+
+              {/* MODAL: CATAT PENGELUARAN */}
+              {modalPengeluaran && onCatatPengeluaran && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
+                      <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-fade-in-up">
+                          <div className="bg-indigo-600 px-6 py-4 flex justify-between items-center text-white">
+                              <h3 className="font-bold flex items-center gap-2">
+                                  <span className="material-icons">trending_down</span>
+                                  Catat Pengeluaran
+                              </h3>
+                              <button onClick={tutupModalPengeluaran} className="text-indigo-200 hover:text-white">
+                                  <span className="material-icons">close</span>
+                              </button>
+                          </div>
+
+                          <form onSubmit={simpanPengeluaran} className="p-6 space-y-4">
+                              <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">Pos Belanja</label>
+                                  <select
+                                      value={posBaru}
+                                      onChange={e => setPosBaru(e.target.value)}
+                                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                                  >
+                                      {KATEGORI_PENGELUARAN.map(k => (
+                                          <option key={k.id} value={k.id}>{k.label}</option>
+                                      ))}
+                                  </select>
+                              </div>
+
+                              <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">Keterangan</label>
+                                  <input
+                                      type="text"
+                                      required
+                                      value={keteranganBaru}
+                                      onChange={e => setKeteranganBaru(e.target.value)}
+                                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                      placeholder="mis. Solar mobil pengiriman"
+                                  />
+                              </div>
+
+                              <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">Tanggal</label>
+                                  <input
+                                      type="date"
+                                      required
+                                      value={tanggalBaru}
+                                      max={hariIni()}
+                                      onChange={e => setTanggalBaru(e.target.value)}
+                                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                  />
+                              </div>
+
+                              <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">Nominal</label>
+                                  <div className="relative">
+                                      <span className="absolute left-3 top-2 text-gray-500 text-sm">Rp</span>
+                                      <input
+                                          type="number"
+                                          required
+                                          min={1}
+                                          value={nominalBaru}
+                                          onChange={e => setNominalBaru(e.target.value)}
+                                          className="w-full border border-gray-300 rounded-lg pl-10 pr-3 py-2 text-lg font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
+                                          placeholder="0"
+                                      />
+                                  </div>
+                              </div>
+
+                              {pesanGagal && (
+                                  <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                                      {pesanGagal}
+                                  </p>
+                              )}
+
+                              <div className="pt-2 flex justify-end gap-3">
+                                  <button
+                                      type="button"
+                                      onClick={tutupModalPengeluaran}
+                                      disabled={sedangSimpan}
+                                      className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                                  >
+                                      Batal
+                                  </button>
+                                  <button
+                                      type="submit"
+                                      disabled={!siapSimpan || sedangSimpan}
+                                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                  >
+                                      {sedangSimpan ? 'Menyimpan...' : 'Simpan Pengeluaran'}
+                                  </button>
+                              </div>
+                          </form>
+                      </div>
+                  </div>
+              )}
           </div>
       )}
 

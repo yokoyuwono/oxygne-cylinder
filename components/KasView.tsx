@@ -13,6 +13,12 @@ export interface KasPayload {
   description: string;
   amount: number;
   date: string;
+
+  /**
+   * Pos belanja, hanya terisi kalau pengeluarannya dicatat dari tab Keuangan.
+   * Halaman ini sengaja tidak menanyakannya -- lihat lib/pengeluaran.ts.
+   */
+  kategori?: string;
 }
 
 interface KasViewProps {

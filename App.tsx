@@ -19,6 +19,7 @@ import { NewRentalPayload } from './components/NewRentalForm';
 import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, PenukaranTabung, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff } from './types';
 import { bolehKelolaPengguna } from './lib/peran';
 import KasView, { KasPayload } from './components/KasView';
+import { PengeluaranPayload } from './lib/pengeluaran';
 import BonView, { BayarBonPayload, TambahBonPayload } from './components/BonView';
 import { supabase, isSupabaseConfigured, fetchAllRecords } from './lib/supabase';
 
@@ -893,6 +894,7 @@ const App: React.FC = () => {
       cost: payload.amount,
       paymentStatus: 'PAID',
       description: payload.description,
+      category: payload.kategori,
     };
 
     const { error } = await supabase.from('transactions').insert(tx);
@@ -900,6 +902,15 @@ const App: React.FC = () => {
 
     setTransactions(prev => [...prev, tx]);
   };
+
+  /**
+   * Pengeluaran yang dicatat dari tab Keuangan -- sama persis dengan kas keluar di
+   * atas, hanya membawa pos belanjanya. Sengaja menumpang handler yang sama, bukan
+   * jalur tersendiri: satu bentuk baris berarti satu tempat yang perlu diperbaiki
+   * kalau nanti pencatatannya berubah.
+   */
+  const handleCatatPengeluaran = (payload: PengeluaranPayload) =>
+    handleCatatKas({ jenis: 'EXPENSE', ...payload });
 
   /**
    * Membatalkan transaksi yang salah catat.
@@ -1215,6 +1226,7 @@ const App: React.FC = () => {
               stations={refillStations}
               role={currentUser.role}
               onBatalkanTransaksi={handleBatalkanTransaksi}
+              onCatatPengeluaran={handleCatatPengeluaran}
             />
           } />
 
