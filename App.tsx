@@ -16,7 +16,7 @@ import HistoryView from './components/HistoryView';
 import MasterDataView from './components/MasterDataView';
 import GasExchangeView, { GasExchangePayload } from './components/GasExchangeView';
 import { NewRentalPayload } from './components/NewRentalForm';
-import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, PenukaranTabung, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff } from './types';
+import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, PenukaranTabung, AppUser, UserRole, MemberStatus, GasPrice, RentalTariff, MetodeBayar } from './types';
 import { bolehKelolaPengguna } from './lib/peran';
 import KasView, { KasPayload } from './components/KasView';
 import { PengeluaranPayload } from './lib/pengeluaran';
@@ -719,7 +719,7 @@ const App: React.FC = () => {
    * kolom depositAmount supaya Laporan Keuangan tidak melaporkan titipan sebagai laba.
    */
   const handleNewRental = async (payload: NewRentalPayload) => {
-    const { isNewMember, member, rentalDate, items, totals } = payload;
+    const { isNewMember, member, rentalDate, items, totals, metodeBayar } = payload;
 
     // -- 1. Pelanggan --
     let memberId = member.id || '';
@@ -835,6 +835,7 @@ const App: React.FC = () => {
       date: rentalDate,
       cost: (i.rentalFee + i.gasPrice) * i.quantity + (i.regulatorFee || 0) + (i.regulatorSalePrice || 0),
       paymentStatus: 'PAID',
+      paymentMethod: metodeBayar,
       depositAmount: i.depositAmount * i.quantity,
       rentalFee: i.rentalFee * i.quantity,
       gasPrice: i.gasPrice * i.quantity,
@@ -867,6 +868,7 @@ const App: React.FC = () => {
       date: payload.date,
       cost: payload.pricePerUnit * payload.quantity,
       paymentStatus: 'PAID',
+      paymentMethod: payload.metodeBayar,
       quantity: payload.quantity,
       size: payload.size,
       gasPrice: payload.pricePerUnit,
@@ -895,6 +897,7 @@ const App: React.FC = () => {
       paymentStatus: 'PAID',
       description: payload.description,
       category: payload.kategori,
+      paymentMethod: payload.metodeBayar,
     };
 
     const { error } = await supabase.from('transactions').insert(tx);
@@ -945,7 +948,9 @@ const App: React.FC = () => {
     totalCost: number,
     isUnpaid: boolean = false,
     returnRegulatorQty: number = 0,
-    returnBulkQty: Record<string, number> = {}
+    returnBulkQty: Record<string, number> = {},
+    // Kosong untuk sewa yang dibayar nanti -- uangnya belum berpindah.
+    metodeBayar?: MetodeBayar
   ) => {
     const member = members.find(m => m.id === memberId);
     if (!member) return;
@@ -1029,7 +1034,8 @@ const App: React.FC = () => {
           type: 'RENTAL_OUT',
           date: date,
           cost: rentCylinderIds.length > 0 ? (totalCost / rentCylinderIds.length) : 0,
-          paymentStatus: isUnpaid ? 'UNPAID' : 'PAID'
+          paymentStatus: isUnpaid ? 'UNPAID' : 'PAID',
+          paymentMethod: isUnpaid ? undefined : metodeBayar
         });
       });
     }

@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { Member, RentalTariff, Transaction, CylinderSize, GasType } from '../types';
+import { Member, RentalTariff, Transaction, CylinderSize, GasType, MetodeBayar } from '../types';
 import { tarifCurahAktif } from '../lib/bulkStock';
 import { formatTanggal } from '../labels';
+import PilihMetodeBayar from './PilihMetodeBayar';
 
 export interface GasExchangePayload {
   gasType: GasType;
@@ -10,6 +11,7 @@ export interface GasExchangePayload {
   pricePerUnit: number;
   memberId?: string;
   date: string;
+  metodeBayar: MetodeBayar;
 }
 
 interface GasExchangeViewProps {
@@ -37,6 +39,7 @@ const GasExchangeView: React.FC<GasExchangeViewProps> = ({ tariffs, members, tra
   const [jumlah, setJumlah] = useState(1);
   const [harga, setHarga] = useState<number>(Number(curah[0]?.gasPrice) || 0);
   const [tanggal, setTanggal] = useState(hariIni());
+  const [metodeBayar, setMetodeBayar] = useState<MetodeBayar>('CASH');
   const [memberId, setMemberId] = useState('');
   const [cariMember, setCariMember] = useState('');
   const [busy, setBusy] = useState(false);
@@ -81,11 +84,16 @@ const GasExchangeView: React.FC<GasExchangeViewProps> = ({ tariffs, members, tra
         pricePerUnit: harga,
         memberId: memberId || undefined,
         date: new Date(tanggal).toISOString(),
+        metodeBayar,
       });
       setFeedback({ msg: `Tukar isi ${jumlah} botol tercatat.`, type: 'success' });
       setJumlah(1);
       setMemberId('');
       setCariMember('');
+      // Jenis dan harga sengaja tetap -- pembeli berikutnya biasanya menukar yang sama.
+      // Metode bayarnya tidak: yang menempel dari pembeli sebelumnya adalah cara paling
+      // mudah menandai pembayaran tunai sebagai transfer.
+      setMetodeBayar('CASH');
       setTimeout(() => setFeedback(null), 3500);
     } catch (e) {
       setFeedback({ msg: e instanceof Error ? e.message : 'Gagal menyimpan.', type: 'error' });
@@ -227,6 +235,9 @@ const GasExchangeView: React.FC<GasExchangeViewProps> = ({ tariffs, members, tra
             <p className="text-[11px] text-gray-400 pt-2">
               Jumlah stok tidak berubah &mdash; botol masuk satu, keluar satu.
             </p>
+          </div>
+          <div className="pt-4 mt-4 border-t border-gray-100">
+            <PilihMetodeBayar nilai={metodeBayar} onGanti={setMetodeBayar} />
           </div>
           <button
             onClick={simpan}

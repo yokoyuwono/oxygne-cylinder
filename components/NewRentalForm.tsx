@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { Cylinder, CylinderStatus, Member, RentalTariff, Transaction } from '../types';
+import { Cylinder, CylinderStatus, Member, MetodeBayar, RentalTariff, Transaction } from '../types';
 import { totalRegulatorBeredar } from '../lib/bulkStock';
+import PilihMetodeBayar from './PilihMetodeBayar';
 
 export interface NewRentalItem {
   /** Kosong untuk baris curah -- botolnya tidak berkode, jadi tidak ada unit tertentu. */
@@ -28,6 +29,7 @@ export interface NewRentalPayload {
   source: 'TOKO' | 'DELIVERY';
   items: NewRentalItem[];
   totals: { deposit: number; revenue: number };
+  metodeBayar: MetodeBayar;
 }
 
 interface NewRentalFormProps {
@@ -52,6 +54,7 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
 
   const [tanggal, setTanggal] = useState(hariIni());
   const [sumber, setSumber] = useState<'TOKO' | 'DELIVERY'>('TOKO');
+  const [metodeBayar, setMetodeBayar] = useState<MetodeBayar>('CASH');
 
   const [cariTabung, setCariTabung] = useState('');
   const [keranjang, setKeranjang] = useState<NewRentalItem[]>([]);
@@ -203,6 +206,7 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
         source: sumber,
         items: keranjang,
         totals: { deposit: total.deposit, revenue: total.pendapatan },
+        metodeBayar,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Gagal menyimpan sewa.');
@@ -513,6 +517,10 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
           <div className="flex justify-between text-lg font-bold text-indigo-600 pt-3 border-t-2 border-gray-100">
             <span>Total dibayar sekarang</span><span className="font-mono">{formatIDR(total.bayar)}</span>
           </div>
+        </div>
+
+        <div className="mt-5 pt-5 border-t border-gray-100">
+          <PilihMetodeBayar nilai={metodeBayar} onGanti={setMetodeBayar} />
         </div>
 
         <div className="flex justify-end gap-3 mt-6">

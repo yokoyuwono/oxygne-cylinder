@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Transaction, UserRole } from '../types';
+import { MetodeBayar, Transaction, UserRole } from '../types';
 import { formatIDR, formatTanggal } from '../labels';
 import { hariIni } from '../lib/laporanHarian';
 import { bolehLihatKeuanganPenuh } from '../lib/peran';
+import PilihMetodeBayar from './PilihMetodeBayar';
 
 /** Uang masuk yang tidak lewat tabung, dan uang keluar di luar isi ulang. */
 export type JenisKas = 'INCOME' | 'EXPENSE';
@@ -19,6 +20,15 @@ export interface KasPayload {
    * Halaman ini sengaja tidak menanyakannya -- lihat lib/pengeluaran.ts.
    */
   kategori?: string;
+
+  /**
+   * Tunai atau transfer, hanya untuk sisi Uang Masuk.
+   *
+   * Uang Keluar tidak ditanyai: yang dipisah di Laporan Harian baru sisi pemasukan,
+   * dan menambah satu pilihan yang belum dipakai laporan mana pun cuma memperlambat
+   * pencatatan belanja harian.
+   */
+  metodeBayar?: MetodeBayar;
 }
 
 interface KasViewProps {
@@ -95,6 +105,7 @@ const KasView: React.FC<KasViewProps> = ({ transactions, role, onSubmit, onDelet
   const [keterangan, setKeterangan] = useState('');
   const [nominal, setNominal] = useState('');
   const [tanggal, setTanggal] = useState(hariIni);
+  const [metodeBayar, setMetodeBayar] = useState<MetodeBayar>('CASH');
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [akanDihapus, setAkanDihapus] = useState<Transaction | null>(null);
@@ -117,6 +128,7 @@ const KasView: React.FC<KasViewProps> = ({ transactions, role, onSubmit, onDelet
     // pernah benar untuk sisi lainnya, dan menyisakannya mengundang salah catat arah.
     setKeterangan('');
     setNominal('');
+    setMetodeBayar('CASH');
     setFeedback(null);
   };
 
@@ -128,10 +140,20 @@ const KasView: React.FC<KasViewProps> = ({ transactions, role, onSubmit, onDelet
 
     setBusy(true);
     try {
-      await onSubmit({ jenis, description: keterangan.trim(), amount: jumlah, date: new Date(tanggal).toISOString() });
+      await onSubmit({
+        jenis,
+        description: keterangan.trim(),
+        amount: jumlah,
+        date: new Date(tanggal).toISOString(),
+        // Uang Keluar tidak punya pemilihnya, jadi tidak dibawa sama sekali.
+        metodeBayar: jenis === 'INCOME' ? metodeBayar : undefined,
+      });
       setFeedback({ msg: `${konfig.judul} ${formatIDR(jumlah)} tercatat.`, type: 'success' });
       setKeterangan('');
       setNominal('');
+      // Kembali ke Tunai, sama seperti isian lain. Pilihan yang menempel dari catatan
+      // sebelumnya adalah cara paling mudah menandai pembayaran tunai jadi transfer.
+      setMetodeBayar('CASH');
       setTimeout(() => setFeedback(null), 3500);
     } catch (e) {
       setFeedback({ msg: e instanceof Error ? e.message : 'Gagal menyimpan.', type: 'error' });
@@ -208,6 +230,10 @@ const KasView: React.FC<KasViewProps> = ({ transactions, role, onSubmit, onDelet
             />
           </div>
         </div>
+
+        {jenis === 'INCOME' && (
+          <PilihMetodeBayar nilai={metodeBayar} onGanti={setMetodeBayar} />
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
           <div className="md:col-span-2">

@@ -168,6 +168,14 @@ export interface PenukaranTabung {
   pengganti?: { serialCode: string; gasType: GasType; size: CylinderSize };
 }
 
+/**
+ * Cara uangnya berpindah, sekadar penanda untuk pencatatan.
+ *
+ * Nilainya berbahasa Inggris seperti kolom lain yang tersimpan di basis data;
+ * labelnya diterjemahkan di labels.ts.
+ */
+export type MetodeBayar = 'CASH' | 'TRANSFER';
+
 export interface Transaction {
   id: string;
   cylinderId?: string; // Optional for DEBT_PAYMENT
@@ -178,6 +186,19 @@ export interface Transaction {
   rentalDuration?: number; // Days held (relevant for RETURN type)
   cost?: number; // Revenue only -- rental fee + gas + regulator. Deposit is NOT included.
   paymentStatus?: 'PAID' | 'UNPAID';
+
+  /**
+   * Tunai atau transfer, untuk baris pemasukan yang dicatat lewat Tukar Besar,
+   * Tukar Kecil, dan Uang Masuk.
+   *
+   * Kosong untuk seluruh catatan lama, untuk sewa yang dibayar nanti (paymentStatus
+   * 'UNPAID' -- uangnya belum berpindah, jadi belum ada metodenya), dan untuk baris
+   * yang bukan pemasukan. Rekap per metode memperlakukan yang kosong sebagai
+   * kelompok tersendiri, jadi tidak ada baris yang hilang dari hitungan. Daftar
+   * metodenya ada di lib/metodeBayar.ts.
+   */
+  paymentMethod?: MetodeBayar;
+
   relatedTransactionIds?: string[]; // IDs of transactions paid by this DEBT_PAYMENT
 
   // Breakdown captured at the moment of the transaction. These are copies, not

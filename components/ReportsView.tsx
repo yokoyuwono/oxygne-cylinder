@@ -5,6 +5,7 @@ import { sebutanBarang } from '../lib/bulkStock';
 import { bolehBatalkanTransaksi, bolehLihatKeuanganPenuh } from '../lib/peran';
 import { barisPendapatan, barisPengeluaran, hariIni, hitungLaporanHarian, tanggalLokal } from '../lib/laporanHarian';
 import { KATEGORI_PENGELUARAN, PengeluaranPayload, rekapPengeluaranPerKategori } from '../lib/pengeluaran';
+import { kelompokMetode, rekapPemasukanPerMetode } from '../lib/metodeBayar';
 import { usePaginasi } from '../lib/usePaginasi';
 import Paginasi from './Paginasi';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
@@ -260,6 +261,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
 
   // Satu hari biasanya pendek, tapi hari sibuk bisa panjang -- dan komponennya sudah ada.
   const halamanHarian = usePaginasi(laporanHarian.transaksi, BARIS_PER_HALAMAN);
+
+  // Memecah kartu Pemasukan supaya uang di laci bisa dicocokkan dengan yang di rekening.
+  const pemasukanPerMetode = useMemo(
+      () => rekapPemasukanPerMetode(laporanHarian.transaksi),
+      [laporanHarian.transaksi]);
 
   // -- Data Processing: Logs --
   //
@@ -582,6 +588,42 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                   </div>
               </div>
 
+              {/* Pemasukan per Metode -- memecah kartu Pemasukan di atas supaya uang di
+                  laci bisa dicocokkan dengan yang masuk rekening. Sengaja tidak dijaga
+                  peran: tab ini memang tab yang dilihat Operator setiap hari. */}
+              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                      <h3 className="font-bold text-gray-800">Pemasukan per Metode</h3>
+                      <span className="text-sm font-bold text-gray-500">{formatIDR(laporanHarian.pemasukan)}</span>
+                  </div>
+
+                  {pemasukanPerMetode.length > 0 ? (
+                      <div className="space-y-3">
+                          {pemasukanPerMetode.map(metode => (
+                              <div key={metode.id}>
+                                  <div className="flex items-center justify-between gap-3 mb-1.5">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                          <span className="material-icons text-base text-gray-400 shrink-0">{metode.ikon}</span>
+                                          <p className="text-sm text-gray-700 font-medium truncate">{metode.label}</p>
+                                      </div>
+                                      <div className="flex items-baseline gap-3 shrink-0">
+                                          <p className="text-sm font-bold text-gray-900">{formatIDR(metode.total)}</p>
+                                          <span className="text-xs text-gray-400 w-9 text-right">{metode.persen.toFixed(0)}%</span>
+                                      </div>
+                                  </div>
+                                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                      <div className="h-full bg-green-400 rounded-full" style={{ width: `${metode.persen}%` }} />
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                  ) : (
+                      <div className="h-24 flex items-center justify-center text-gray-400 text-sm">
+                          Belum ada pemasukan pada tanggal ini.
+                      </div>
+                  )}
+              </div>
+
               {laporanHarian.transaksi.length > 0 ? (
                   <div className="space-y-4">
                       {/* Desktop: tabel. HP: kartu -- kolom Jumlah dulu tersembunyi di
@@ -618,6 +660,14 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                               </td>
                                               <td className="px-6 py-4 text-right font-medium">
                                                   {t.cost ? formatIDR(t.cost) : '-'}
+                                                  {/* Penanda metode hanya pada baris yang ikut dihitung
+                                                      sebagai pemasukan -- itu yang direkap di kartu atas,
+                                                      jadi angkanya bisa ditelusuri per baris. */}
+                                                  {barisPendapatan(t) && (
+                                                      <span className="block text-[11px] font-normal text-gray-400 mt-0.5">
+                                                          {kelompokMetode(t).label}
+                                                      </span>
+                                                  )}
                                               </td>
                                           </tr>
                                       );
@@ -645,6 +695,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                       <BarisKartu label="Pihak">{member ? member.companyName : (station ? station.name : '-')}</BarisKartu>
                                       <BarisKartu label="Jumlah">
                                           <span className="font-bold">{t.cost ? formatIDR(t.cost) : '-'}</span>
+                                          {barisPendapatan(t) && (
+                                              <span className="block text-[11px] font-normal text-gray-400 mt-0.5">
+                                                  {kelompokMetode(t).label}
+                                              </span>
+                                          )}
                                       </BarisKartu>
                                   </div>
                               );

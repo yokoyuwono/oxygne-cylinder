@@ -55,6 +55,12 @@ export const STATUS_BAYAR: Record<string, string> = {
   UNPAID: 'Belum Lunas',
 };
 
+/** Cara uangnya berpindah -- bukan status lunasnya, yang ada di STATUS_BAYAR. */
+export const METODE_BAYAR: Record<string, string> = {
+  CASH: 'Tunai',
+  TRANSFER: 'Transfer',
+};
+
 export const PERAN_PENGGUNA: Record<UserRole, string> = {
   [UserRole.Admin]: 'Administrator',
   [UserRole.Operator]: 'Operator',
@@ -89,6 +95,9 @@ export const labelJenisTransaksi = (v: string | null | undefined) =>
 
 export const labelStatusBayar = (v: string | null | undefined) =>
   label(STATUS_BAYAR, v);
+
+export const labelMetodeBayar = (v: string | null | undefined) =>
+  label(METODE_BAYAR, v);
 
 export const labelPeran = (v: string | null | undefined) =>
   label(PERAN_PENGGUNA, v);

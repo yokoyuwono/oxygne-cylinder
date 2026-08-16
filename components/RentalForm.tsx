@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Cylinder, CylinderStatus, Member, MemberPrice, Transaction, GasPrice, RentalTariff } from '../types';
+import { Cylinder, CylinderStatus, Member, MemberPrice, MetodeBayar, Transaction, GasPrice, RentalTariff } from '../types';
 import { supabase } from '../lib/supabase';
 import NewRentalForm, { NewRentalPayload } from './NewRentalForm';
+import PilihMetodeBayar from './PilihMetodeBayar';
 import { hitungHoldingCurah, hitungHoldingRegulator } from '../lib/bulkStock';
 import { cariDiKolom } from '../lib/cari';
 
@@ -13,7 +14,9 @@ interface RentalFormProps {
     gasPrices: GasPrice[];
     transactions: Transaction[];
     tariffs: RentalTariff[];
-    onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean, returnRegulatorQty?: number, returnBulkQty?: Record<string, number>) => void;
+    // metodeBayar sengaja di ujung: tanda tangan ini sudah panjang, dan menambah di
+    // belakang tidak menggeser satu pun argumen yang sudah ada.
+    onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean, returnRegulatorQty?: number, returnBulkQty?: Record<string, number>, metodeBayar?: MetodeBayar) => void;
     onNewRental: (payload: NewRentalPayload) => Promise<void>;
 }
 
@@ -34,6 +37,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [feedback, setFeedback] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
     const [transactionSource, setTransactionSource] = useState<'TOKO' | 'DELIVERY'>('TOKO');
+    const [metodeBayar, setMetodeBayar] = useState<MetodeBayar>('CASH');
 
     // -- Mobile View State --
     const [mobileTab, setMobileTab] = useState<'rent' | 'return'>('rent');
@@ -330,7 +334,12 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
 
         const totalCost = cart.reduce((sum, item) => sum + getPrice(item, selectedMemberId).price, 0);
 
-        onCompleteRental(selectedMemberId, cart.map(c => c.id), returnsList, totalCost, isUnpaid, returnRegulatorQty, returnBulk);
+        // Bayar Nanti tidak membawa metode: uangnya belum berpindah, jadi belum ada
+        // metodenya. Barisnya muncul sebagai "Belum Dibayar" di Laporan Harian.
+        onCompleteRental(
+            selectedMemberId, cart.map(c => c.id), returnsList, totalCost, isUnpaid,
+            returnRegulatorQty, returnBulk, isUnpaid ? undefined : metodeBayar
+        );
 
         // Reset
         setCart([]);
@@ -342,6 +351,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
         setMemberQuery('');
         setDebouncedMemberQuery('');
         setError(null);
+        setMetodeBayar('CASH');
         setIsConfirmOpen(false);
         showFeedback(isUnpaid ? `Rental recorded. Added ${formatIDR(totalCost)} to debt.` : `Transaction successful. Paid ${formatIDR(totalCost)}.`);
     };
@@ -980,6 +990,11 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
 
                         {/* Modal Actions */}
                         <div className="p-4 bg-gray-50 border-t border-gray-100 flex flex-col gap-3">
+                            {/* Pengembalian murni tidak bernominal -- tidak ada uang yang
+                                berpindah, jadi tidak ada metode yang perlu ditanyakan. */}
+                            {totalCost > 0 && (
+                                <PilihMetodeBayar nilai={metodeBayar} onGanti={setMetodeBayar} />
+                            )}
                             <button
                                 onClick={() => confirmTransaction(false)}
                                 className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-lg shadow-indigo-200 transition-colors flex items-center justify-center gap-2"
