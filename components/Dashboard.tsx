@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { Cylinder, Transaction, Member, GasOrder, RefillStation, RentalTariff } from '../types';
+import { AMBANG_PESANAN_LAMA, RingkasanAntrian, daftarAntrian } from '../lib/antrianIsi';
 import { sebutanBarang } from '../lib/bulkStock';
 import {
   ItemTindakan,
@@ -43,6 +44,17 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
 
   const bon = useMemo(() => hitungBon(members), [members]);
 
+  // Memakai ulang daftarAntrian, bukan menghitung sendiri: kalau Beranda dan halaman
+  // Antrian Isi memakai dua perhitungan yang berbeda, keduanya bisa menunjukkan
+  // jumlah yang tidak sama dan tidak ada yang tahu mana yang benar.
+  const kodeTabung = useMemo(
+    () => new Map(cylinders.map(c => [c.id, c.serialCode])),
+    [cylinders]);
+
+  const antrianIsi = useMemo(
+    () => daftarAntrian(gasOrders, members, kodeTabung),
+    [gasOrders, members, kodeTabung]);
+
   const aktivitasTerbaru = useMemo(
     () => ringkasAktivitas(transactions, cylinders, members, stations),
     [transactions, cylinders, members, stations]);
@@ -67,6 +79,7 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
 
         <div className="space-y-6">
           <AksiCepat onBuka={navigate} />
+          <AntrianIsiBlok antrian={antrianIsi} onBuka={() => navigate('/antrian')} />
           <BonPelanggan bon={bon} onBuka={() => navigate('/bon')} />
         </div>
       </div>
@@ -309,6 +322,73 @@ const BonPelanggan: React.FC<{ bon: RingkasanBon; onBuka: () => void }> = ({ bon
 
         <button onClick={onBuka} className="mt-4 text-sm font-medium text-indigo-600 hover:underline">
           Buka Data Pelanggan
+        </button>
+      </>
+    )}
+  </div>
+);
+
+// ------------------------------------------------------------------- Antrian isi
+
+/** Sebanyak-banyaknya pesanan yang disebut namanya di Beranda; sisanya dihitung saja. */
+const BATAS_BARIS_ANTRIAN = 5;
+
+/**
+ * Pesanan yang isinya belum diserahkan.
+ *
+ * Sejajar dengan Bon Pelanggan di bawahnya, dan itu disengaja: keduanya utang yang
+ * belum selesai, cuma berlawanan arah. Bon adalah uang yang belum masuk; antrian isi
+ * adalah barang yang belum keluar, dan yang menagihnya pelanggan, bukan toko.
+ *
+ * Yang ditonjolkan jumlah pesanan, bukan nominalnya. Harga di pesanan cuma taksiran
+ * -- untuk titip isi sering baru diketahui setelah pabrik menagih -- jadi
+ * menjumlahkannya jadi satu angka besar di Beranda akan menampilkan rupiah yang tidak
+ * pernah dijanjikan siapa pun.
+ */
+const AntrianIsiBlok: React.FC<{ antrian: RingkasanAntrian; onBuka: () => void }> = ({ antrian, onBuka }) => (
+  <div className={`${KARTU} p-6`}>
+    <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Antrian Isi</h2>
+
+    {antrian.jumlahMenunggu === 0 ? (
+      <div className="flex items-center gap-3 text-gray-500">
+        <span className="material-icons text-green-500">check_circle</span>
+        <p className="text-sm">Tidak ada isi yang belum diserahkan.</p>
+      </div>
+    ) : (
+      <>
+        <p className="text-2xl font-bold text-indigo-600">{antrian.jumlahMenunggu} pesanan</p>
+        <p className="text-xs text-gray-500 mb-4">
+          menunggu isi
+          {antrian.belumBayar > 0 && ` · ${antrian.belumBayar} belum dibayar`}
+          {antrian.lewatAmbang > 0 && ` · ${antrian.lewatAmbang} lewat ${AMBANG_PESANAN_LAMA} hari`}
+        </p>
+
+        <ul className="space-y-2">
+          {antrian.menunggu.slice(0, BATAS_BARIS_ANTRIAN).map(b => (
+            <li key={b.pesanan.id} className="flex justify-between items-start gap-2 text-sm">
+              <span className="min-w-0">
+                <span className="block text-gray-700 truncate">{b.nama}</span>
+                <span className="block text-xs text-gray-400 truncate">{b.ringkasBarang}</span>
+              </span>
+              <span
+                className={`shrink-0 font-bold ${
+                  b.umurHari >= AMBANG_PESANAN_LAMA ? 'text-red-600' : 'text-gray-800'
+                }`}
+              >
+                {b.umurHari === 0 ? 'hari ini' : `${b.umurHari} hari`}
+              </span>
+            </li>
+          ))}
+        </ul>
+
+        {antrian.jumlahMenunggu > BATAS_BARIS_ANTRIAN && (
+          <p className="text-xs text-gray-400 mt-2">
+            dan {antrian.jumlahMenunggu - BATAS_BARIS_ANTRIAN} lainnya
+          </p>
+        )}
+
+        <button onClick={onBuka} className="mt-4 text-sm font-medium text-indigo-600 hover:underline">
+          Buka Antrian Isi
         </button>
       </>
     )}
