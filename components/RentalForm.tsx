@@ -4,7 +4,8 @@ import { Cylinder, CylinderStatus, Member, MemberPrice, MetodeBayar, Transaction
 import { supabase } from '../lib/supabase';
 import NewRentalForm, { NewRentalPayload } from './NewRentalForm';
 import PilihMetodeBayar from './PilihMetodeBayar';
-import { hitungHoldingCurah, hitungHoldingRegulator } from '../lib/bulkStock';
+import { hitungHoldingCurah, hitungHoldingRegulator, totalRegulatorBeredar } from '../lib/bulkStock';
+import { tarifRegulatorAktif } from '../lib/regulator';
 import { cariDiKolom } from '../lib/cari';
 
 interface RentalFormProps {
@@ -16,7 +17,7 @@ interface RentalFormProps {
     tariffs: RentalTariff[];
     // metodeBayar sengaja di ujung: tanda tangan ini sudah panjang, dan menambah di
     // belakang tidak menggeser satu pun argumen yang sudah ada.
-    onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean, returnRegulatorQty?: number, returnBulkQty?: Record<string, number>, metodeBayar?: MetodeBayar) => void;
+    onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean, returnRegulatorQty?: number, returnBulkQty?: Record<string, number>, metodeBayar?: MetodeBayar, regulatorKeluar?: { sewa: number; jual: number }) => void;
     onNewRental: (payload: NewRentalPayload) => Promise<void>;
 }
 
@@ -29,6 +30,9 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
     const [cart, setCart] = useState<Cylinder[]>([]);
     const [returnsList, setReturnsList] = useState<string[]>([]); // IDs of cylinders being returned
     const [returnRegulatorQty, setReturnRegulatorQty] = useState(0); // Berapa unit regulator sewaan dikembalikan
+    // Regulator yang KELUAR pada transaksi ini -- lawan dari returnRegulatorQty di atas.
+    const [regSewaQty, setRegSewaQty] = useState(0);
+    const [regJualQty, setRegJualQty] = useState(0);
     // Berapa botol tanpa kode yang dikembalikan, per ukuran.
     const [returnBulk, setReturnBulk] = useState<Record<string, number>>({});
     const [error, setError] = useState<string | null>(null);
@@ -159,7 +163,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
         : [];
 
     // Tarif regulator aktif -- sama seperti NewRentalForm, cuma satu yang dipakai.
-    const tarifRegulator = tariffs.find(t => t.kind === 'REGULATOR' && t.isActive);
+    const tarifRegulator = tarifRegulatorAktif(tariffs);
 
     // Berapa unit regulator sewaan yang sedang dipegang pelanggan ini, diturunkan
     // dari transaksi (bukan disimpan) -- yang dibeli sudah jadi milik mereka,
@@ -167,6 +171,20 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
     const heldRegulatorQty = selectedMemberId && tarifRegulator
         ? hitungHoldingRegulator(transactions, selectedMemberId, tarifRegulator.id)
         : 0;
+
+    // Sisa yang boleh dikeluarkan. Perhitungannya sengaja sama persis dengan Sewa
+    // Baru: yang bekas disewakan dan dikurangi unit yang sedang beredar di tangan
+    // pelanggan mana pun, yang baru dijual putus dan dikurangi saat terjual.
+    const stokRegulator = {
+        sisaSewa: tarifRegulator
+            ? Math.max(0, (tarifRegulator.regulatorUsedStock || 0) - totalRegulatorBeredar(transactions, tarifRegulator.id))
+            : 0,
+        sisaJual: tarifRegulator ? Math.max(0, tarifRegulator.regulatorNewStock || 0) : 0,
+    };
+
+    const hargaRegSewa = Number(tarifRegulator?.rentalFee) || 0;
+    const hargaRegJual = Number(tarifRegulator?.salePrice) || 0;
+    const totalRegulator = regSewaQty * hargaRegSewa + regJualQty * hargaRegJual;
 
     // Botol tanpa kode yang dipegang pelanggan. Dihitung dari selisih transaksi,
     // bukan disimpan, supaya tidak ada angka kembar yang bisa melenceng.
@@ -231,6 +249,8 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
         setError(null);
         setReturnsList([]);
         setReturnRegulatorQty(0);
+        setRegSewaQty(0);
+        setRegJualQty(0);
         setReturnBulk({});
         // Automatically focus scanner after member selection
         setTimeout(() => cylinderInputRef.current?.focus(), 100);
@@ -325,7 +345,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
     const handleCheckoutClick = () => {
         if (!selectedMemberId) return;
         const totalCurahKembali = Object.values(returnBulk).reduce((s, n) => s + n, 0);
-        if (cart.length === 0 && returnsList.length === 0 && returnRegulatorQty === 0 && totalCurahKembali === 0) return;
+        if (cart.length === 0 && returnsList.length === 0 && returnRegulatorQty === 0 && totalCurahKembali === 0 && regSewaQty === 0 && regJualQty === 0) return;
         setIsConfirmOpen(true);
     };
 
@@ -338,13 +358,16 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
         // metodenya. Barisnya muncul sebagai "Belum Dibayar" di Laporan Harian.
         onCompleteRental(
             selectedMemberId, cart.map(c => c.id), returnsList, totalCost, isUnpaid,
-            returnRegulatorQty, returnBulk, isUnpaid ? undefined : metodeBayar
+            returnRegulatorQty, returnBulk, isUnpaid ? undefined : metodeBayar,
+            { sewa: regSewaQty, jual: regJualQty }
         );
 
         // Reset
         setCart([]);
         setReturnsList([]);
         setReturnRegulatorQty(0);
+        setRegSewaQty(0);
+        setRegJualQty(0);
         setReturnBulk({});
         setSelectedMemberId('');
         setSelectedMemberObj(null);
@@ -353,17 +376,63 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
         setError(null);
         setMetodeBayar('CASH');
         setIsConfirmOpen(false);
-        showFeedback(isUnpaid ? `Rental recorded. Added ${formatIDR(totalCost)} to debt.` : `Transaction successful. Paid ${formatIDR(totalCost)}.`);
+        showFeedback(isUnpaid
+            ? `Sewa tercatat. ${formatIDR(totalCost + totalRegulator)} ditambahkan ke bon.`
+            : `Transaksi berhasil. Dibayar ${formatIDR(totalCost + totalRegulator)}.`);
     };
 
     const totalCost = selectedMemberId
         ? cart.reduce((sum, item) => sum + getPrice(item, selectedMemberId).price, 0)
         : 0;
 
+    // Yang ditagih ke pelanggan. totalCost sengaja tetap berisi gas saja: App membagi
+    // angka itu rata ke tiap baris tabung, dan menyelipkan nominal regulator ke sana
+    // akan menempelkan harga regulator pada tabung yang tidak ada hubungannya.
+    const totalTagihan = totalCost + totalRegulator;
+
     useEffect(() => setHighlightedMemberIdx(0), [debouncedMemberQuery]);
     useEffect(() => setHighlightedCylinderIdx(0), [scanInput]);
 
     // --- RENDER ---
+
+    /**
+     * Penghitung unit regulator yang keluar. Bentuknya sengaja sama dengan penghitung
+     * pengembalian regulator di kolom sebelahnya -- alat yang sama untuk pekerjaan
+     * yang sama, cuma arahnya berlawanan.
+     */
+    const kartuRegulatorKeluar = (
+        judul: string, ikon: string, harga: number, sisa: number,
+        qty: number, setQty: React.Dispatch<React.SetStateAction<number>>
+    ) => (
+        <div className={`p-3 rounded-lg border flex items-center justify-between gap-3 ${(qty > 0 ? 'bg-indigo-50 border-indigo-300' : 'bg-white border-gray-200')}`}>
+            <div className="min-w-0">
+                <p className="font-bold text-sm text-gray-800 flex items-center gap-1.5">
+                    <span className="material-icons text-base text-gray-400">{ikon}</span>
+                    {judul}
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                    {formatIDR(harga)} / unit &middot; {sisa > 0 ? `sisa ${sisa} unit` : 'stok habis'}
+                </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+                <button
+                    onClick={() => setQty(n => Math.max(0, n - 1))}
+                    disabled={qty <= 0}
+                    className="w-8 h-8 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-30 text-gray-600 flex items-center justify-center"
+                >
+                    <span className="material-icons text-sm">remove</span>
+                </button>
+                <span className="w-8 text-center font-bold text-gray-800">{qty}</span>
+                <button
+                    onClick={() => setQty(n => Math.min(sisa, n + 1))}
+                    disabled={qty >= sisa}
+                    className="w-8 h-8 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-30 text-gray-600 flex items-center justify-center"
+                >
+                    <span className="material-icons text-sm">add</span>
+                </button>
+            </div>
+        </div>
+    );
 
     const tabBar = (
         <div className="flex justify-center mb-6">
@@ -545,6 +614,8 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         setCart([]);
                         setReturnsList([]);
                         setReturnRegulatorQty(0);
+                        setRegSewaQty(0);
+                        setRegJualQty(0);
                         setReturnBulk({});
                     }}
                     className="px-3 py-1.5 md:px-4 md:py-2 text-xs md:text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors whitespace-nowrap"
@@ -673,6 +744,31 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                 })
                             )}
                         </div>
+
+                        {/* REGULATOR KELUAR -- disewakan atau dijual langsung di meja kasir.
+                            Selalu tampil selama tarifnya aktif, termasuk saat keranjang masih
+                            kosong: menyewakan regulator saja adalah transaksi yang sah, dan
+                            menyembunyikannya sampai ada tabung dipindai persis kekeliruan yang
+                            membuat fitur ini tidak pernah kelihatan di layar Sewa Baru. */}
+                        {tarifRegulator && (
+                            <div className={`${(mobileTab === 'rent' ? 'block' : 'hidden')} lg:block`}>
+                                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                                    <div className="p-3 md:p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                                        <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm md:text-base">
+                                            <span className="material-icons text-indigo-500">settings_input_component</span>
+                                            {tarifRegulator.name || 'Regulator'}
+                                        </h3>
+                                        <span className="text-xs font-medium text-gray-500 bg-white px-2 py-1 rounded border border-gray-200">
+                                            {stokRegulator.sisaSewa} bekas &middot; {stokRegulator.sisaJual} baru
+                                        </span>
+                                    </div>
+                                    <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        {kartuRegulatorKeluar('Disewakan', 'swap_horiz', hargaRegSewa, stokRegulator.sisaSewa, regSewaQty, setRegSewaQty)}
+                                        {kartuRegulatorKeluar('Dijual', 'sell', hargaRegJual, stokRegulator.sisaJual, regJualQty, setRegJualQty)}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         {/* RETURNS LIST (Mobile: Show on Return Tab, Desktop: Always visible if items exist) */}
                         <div className={`${mobileTab === 'return' ? 'block' : 'hidden'} lg:block`}>
@@ -853,6 +949,30 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                             )}
                         </div>
 
+                        {/* SECTION: REGULATOR */}
+                        {totalRegulator > 0 && (
+                            <div className="border-t border-dashed border-gray-200 pt-4">
+                                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-teal-500"></span>
+                                    Regulator
+                                </h3>
+                                <div className="space-y-2">
+                                    {regSewaQty > 0 && (
+                                        <div className="flex justify-between items-center text-sm pl-4">
+                                            <span className="text-gray-600">Disewakan &times; {regSewaQty}</span>
+                                            <span className="font-semibold text-gray-800">{formatIDR(regSewaQty * hargaRegSewa)}</span>
+                                        </div>
+                                    )}
+                                    {regJualQty > 0 && (
+                                        <div className="flex justify-between items-center text-sm pl-4">
+                                            <span className="text-gray-600">Dijual &times; {regJualQty}</span>
+                                            <span className="font-semibold text-gray-800">{formatIDR(regJualQty * hargaRegJual)}</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
                         {/* SECTION: RETURNS */}
                         {returnsList.length > 0 && (
                             <div className="border-t border-dashed border-gray-200 pt-4">
@@ -876,15 +996,15 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                     <div className="bg-gray-900 text-white p-6">
                         <div className="flex justify-between items-center mb-2">
                             <span className="text-gray-400 text-sm">Subtotal Item</span>
-                            <span className="font-mono">{cart.length + returnsList.length}</span>
+                            <span className="font-mono">{cart.length + returnsList.length + regSewaQty + regJualQty}</span>
                         </div>
                         <div className="flex justify-between items-end mb-6">
                             <span className="text-lg font-bold">Total Tagihan</span>
-                            <span className="text-3xl font-bold text-green-400">{formatIDR(totalCost)}</span>
+                            <span className="text-3xl font-bold text-green-400">{formatIDR(totalTagihan)}</span>
                         </div>
                         <button
                             onClick={handleCheckoutClick}
-                            disabled={cart.length === 0 && returnsList.length === 0 && returnRegulatorQty === 0 && Object.values(returnBulk).every(n => !n)}
+                            disabled={cart.length === 0 && returnsList.length === 0 && returnRegulatorQty === 0 && regSewaQty === 0 && regJualQty === 0 && Object.values(returnBulk).every(n => !n)}
                             className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white rounded-xl font-bold text-lg shadow-lg transition-all flex justify-center items-center gap-2"
                         >
                             <span>Konfirmasi &amp; Bayar</span>
@@ -898,12 +1018,15 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                     <div className="flex items-center justify-between gap-4">
                         <div>
                             <p className="text-xs text-gray-500 font-bold uppercase">Total Tagihan</p>
-                            <p className="text-xl font-bold text-indigo-700">{formatIDR(totalCost)}</p>
-                            <p className="text-xs text-gray-400">{cart.length} Rent • {returnsList.length} Return</p>
+                            <p className="text-xl font-bold text-indigo-700">{formatIDR(totalTagihan)}</p>
+                            <p className="text-xs text-gray-400">
+                                {cart.length} Sewa • {returnsList.length} Kembali
+                                {(regSewaQty + regJualQty) > 0 && ` • ${regSewaQty + regJualQty} Regulator`}
+                            </p>
                         </div>
                         <button
                             onClick={handleCheckoutClick}
-                            disabled={cart.length === 0 && returnsList.length === 0 && returnRegulatorQty === 0 && Object.values(returnBulk).every(n => !n)}
+                            disabled={cart.length === 0 && returnsList.length === 0 && returnRegulatorQty === 0 && regSewaQty === 0 && regJualQty === 0 && Object.values(returnBulk).every(n => !n)}
                             className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:text-gray-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95"
                         >
                             Konfirmasi
@@ -973,6 +1096,30 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                         </ul>
                                     </div>
                                 )}
+
+                                {/* Regulator -- disebut terpisah supaya yang disewakan dan yang
+                                    dijual tidak tertukar saat dibacakan ke pelanggan. */}
+                                {totalRegulator > 0 && (
+                                    <div className={(cart.length > 0 || returnsList.length > 0) ? "pt-2 border-t border-dashed border-gray-200" : ""}>
+                                        <h5 className="text-xs font-bold text-teal-600 mb-2 flex items-center gap-1">
+                                            <span className="material-icons text-sm">settings_input_component</span> Regulator
+                                        </h5>
+                                        <ul className="space-y-1">
+                                            {regSewaQty > 0 && (
+                                                <li className="flex justify-between text-sm">
+                                                    <span className="text-gray-600">Disewakan &times; {regSewaQty}</span>
+                                                    <span className="font-medium">{formatIDR(regSewaQty * hargaRegSewa)}</span>
+                                                </li>
+                                            )}
+                                            {regJualQty > 0 && (
+                                                <li className="flex justify-between text-sm">
+                                                    <span className="text-gray-600">Dijual &times; {regJualQty}</span>
+                                                    <span className="font-medium">{formatIDR(regJualQty * hargaRegJual)}</span>
+                                                </li>
+                                            )}
+                                        </ul>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Totals */}
@@ -981,9 +1128,15 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                     <span className="text-gray-500">Subtotal Sewa</span>
                                     <span className="font-semibold text-gray-700">{formatIDR(totalCost)}</span>
                                 </div>
+                                {totalRegulator > 0 && (
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <span className="text-gray-500">Regulator</span>
+                                        <span className="font-semibold text-gray-700">{formatIDR(totalRegulator)}</span>
+                                    </div>
+                                )}
                                 <div className="flex justify-between items-end border-t border-gray-200 pt-2 mt-2">
                                     <span className="font-bold text-gray-800">Total Bersih</span>
-                                    <span className="text-2xl font-bold text-indigo-600">{formatIDR(totalCost)}</span>
+                                    <span className="text-2xl font-bold text-indigo-600">{formatIDR(totalTagihan)}</span>
                                 </div>
                             </div>
                         </div>
@@ -992,7 +1145,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         <div className="p-4 bg-gray-50 border-t border-gray-100 flex flex-col gap-3">
                             {/* Pengembalian murni tidak bernominal -- tidak ada uang yang
                                 berpindah, jadi tidak ada metode yang perlu ditanyakan. */}
-                            {totalCost > 0 && (
+                            {totalTagihan > 0 && (
                                 <PilihMetodeBayar nilai={metodeBayar} onGanti={setMetodeBayar} />
                             )}
                             <button
@@ -1002,7 +1155,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                 <span>Bayar Sekarang</span>
                                 <span className="material-icons text-sm">payments</span>
                             </button>
-                            {totalCost > 0 && (
+                            {totalTagihan > 0 && (
                                 <button
                                     onClick={() => confirmTransaction(true)}
                                     className="w-full py-3 bg-white border-2 border-orange-500 text-orange-600 hover:bg-orange-50 rounded-lg font-bold transition-colors flex items-center justify-center gap-2"

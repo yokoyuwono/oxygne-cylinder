@@ -102,6 +102,10 @@ export function sebutanBarang(t: Transaction, serialCode?: string): string {
   if (serialCode) return serialCode;
   if (t.description) return t.description;
   if (t.quantity && t.size) return `${t.quantity} botol ${t.size}`;
+  // Baris regulator murni -- sewa, beli, atau pengembalian tanpa tabung sama sekali.
+  // Tanpa ini semuanya tertulis "operasi batch" di laporan, termasuk baris yang
+  // bernominal ratusan ribu.
+  if (t.regulatorTariffId) return `${Number(t.regulatorQty) || 1} unit regulator`;
   return 'operasi batch';
 }
 

@@ -6,6 +6,7 @@ import { bolehBatalkanTransaksi, bolehLihatKeuanganPenuh } from '../lib/peran';
 import { barisPendapatan, barisPengeluaran, hariIni, hitungLaporanHarian, tanggalLokal } from '../lib/laporanHarian';
 import { KATEGORI_PENGELUARAN, PengeluaranPayload, rekapPengeluaranPerKategori } from '../lib/pengeluaran';
 import { kelompokMetode, rekapPemasukanPerMetode } from '../lib/metodeBayar';
+import { detailBaris, frasaKeluar, rekapPendapatanRegulator } from '../lib/regulator';
 import { usePaginasi } from '../lib/usePaginasi';
 import Paginasi from './Paginasi';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
@@ -206,6 +207,11 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
   // atas, jadi rinciannya selalu berjumlah persis sama dengan kartunya.
   const rekapPos = useMemo(() => rekapPengeluaranPerKategori(transactions), [transactions]);
 
+  // Regulator bukan pos tersendiri melainkan bagian dari Pemasukan -- disewakan dan
+  // dijual berbarengan dengan tabung, jadi rupiahnya sudah ikut terhitung di sana.
+  // Yang selama ini tidak ada adalah cara melihat berapa besarnya.
+  const rekapRegulator = useMemo(() => rekapPendapatanRegulator(transactions), [transactions]);
+
   // Monthly Trend Data
   const financialTrendData = useMemo(() => {
     const monthlyData: Record<string, { name: string, Income: number, Expense: number, timestamp: number }> = {};
@@ -265,6 +271,10 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
   // Memecah kartu Pemasukan supaya uang di laci bisa dicocokkan dengan yang di rekening.
   const pemasukanPerMetode = useMemo(
       () => rekapPemasukanPerMetode(laporanHarian.transaksi),
+      [laporanHarian.transaksi]);
+
+  const regulatorHarian = useMemo(
+      () => rekapPendapatanRegulator(laporanHarian.transaksi),
       [laporanHarian.transaksi]);
 
   // -- Data Processing: Logs --
@@ -333,7 +343,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
           // sebutanBarang, bukan `code`: baris curah dan regulator tidak punya kode
           // seri, jadi memakai code menghasilkan "Menyewakan Tidak diketahui" --
           // menyesatkan di daftar, dan berbahaya di dialog konfirmasi pembatalan.
-          case 'RENTAL_OUT': return { title: `Menyewakan ${sebutanBarang(t, cyl?.serialCode)}`, subtitle: `Ke ${member?.companyName}`, icon: 'shopping_cart', color: 'bg-blue-100 text-blue-600', badge: 'SEWA' };
+          case 'RENTAL_OUT': return { title: frasaKeluar(t, cyl?.serialCode), subtitle: `Ke ${member?.companyName}`, icon: 'shopping_cart', color: 'bg-blue-100 text-blue-600', badge: 'SEWA' };
           case 'RETURN': return { title: `Dikembalikan ${sebutanBarang(t, cyl?.serialCode)}`, subtitle: `Dari ${member?.companyName}`, icon: 'assignment_return', color: 'bg-green-100 text-green-600', badge: 'KEMBALI' };
           case 'REFILL_OUT': return { title: `Kirim Isi Ulang ${code}`, subtitle: `Ke ${station?.name}`, icon: 'local_shipping', color: 'bg-orange-100 text-orange-600', badge: 'KIRIM' };
           case 'REFILL_IN': return { title: `Diterima Kembali ${code}`, subtitle: tampilkanNominal ? `Biaya: ${t.cost ? formatIDR(t.cost) : '-'}` : `Dari ${station?.name || 'isi ulang'}`, icon: 'inventory_2', color: 'bg-indigo-100 text-indigo-600', badge: 'TERIMA' };
@@ -602,6 +612,46 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                               </div>
                           ))}
                       </div>
+
+                      {/* Bukan kelompok metode keempat, jadi dipisah garis putus-putus dan
+                          diberi kata "di antaranya": rincian metode di atas harus tetap
+                          terbaca sebagai pemecahan yang menjumlah pas ke angka besarnya.
+
+                          Sewa dan jual dipisah, bukan disatukan jadi satu angka regulator.
+                          Keduanya kelihatan sama di laporan -- sama-sama rupiah masuk hari
+                          itu -- padahal yang satu barangnya akan kembali dan yang satu tidak
+                          pernah. Justru pemisahan itu yang dicari saat membuka laporan. */}
+                      {regulatorHarian.total > 0 && (
+                          <div className="mt-3 pt-3 border-t border-dashed border-gray-200 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                  <span className="flex items-center gap-1.5 min-w-0 text-gray-400">
+                                      <span className="material-icons text-sm shrink-0">settings_input_component</span>
+                                      <span className="text-xs truncate">Di antaranya regulator</span>
+                                  </span>
+                                  <span className="text-sm font-bold text-gray-500 whitespace-nowrap">{formatIDR(regulatorHarian.total)}</span>
+                              </div>
+
+                              {regulatorHarian.sewa > 0 && (
+                                  <div className="flex items-center justify-between gap-2 pl-4">
+                                      <span className="flex items-center gap-1.5 min-w-0 text-gray-500">
+                                          <span className="material-icons text-sm text-gray-400 shrink-0">swap_horiz</span>
+                                          <span className="text-xs truncate">Disewakan &middot; {regulatorHarian.unitSewa} unit</span>
+                                      </span>
+                                      <span className="text-sm font-bold text-gray-800 whitespace-nowrap">{formatIDR(regulatorHarian.sewa)}</span>
+                                  </div>
+                              )}
+
+                              {regulatorHarian.jual > 0 && (
+                                  <div className="flex items-center justify-between gap-2 pl-4">
+                                      <span className="flex items-center gap-1.5 min-w-0 text-gray-500">
+                                          <span className="material-icons text-sm text-gray-400 shrink-0">sell</span>
+                                          <span className="text-xs truncate">Terjual &middot; {regulatorHarian.unitJual} unit</span>
+                                      </span>
+                                      <span className="text-sm font-bold text-gray-800 whitespace-nowrap">{formatIDR(regulatorHarian.jual)}</span>
+                                  </div>
+                              )}
+                          </div>
+                      )}
                   </div>
                   <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
                       <p className="text-xs text-gray-500 uppercase font-bold">Pengeluaran</p>
@@ -633,6 +683,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                       const cyl = petaTabung.get(t.cylinderId ?? '');
                                       const member = petaPelanggan.get(t.memberId ?? '');
                                       const station = petaVendor.get(t.refillStationId ?? '');
+                                      const detail = detailBaris(t, cyl?.serialCode);
                                       return (
                                           <tr key={t.id} className="hover:bg-gray-50">
                                               <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
@@ -643,7 +694,12 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                                       {labelJenisTransaksi(t.type)}
                                                   </span>
                                               </td>
-                                              <td className="px-6 py-4 text-gray-700">{sebutanBarang(t, cyl?.serialCode)}</td>
+                                              <td className="px-6 py-4 text-gray-700">
+                                                  {detail.utama}
+                                                  {detail.catatan && (
+                                                      <span className="block text-[11px] text-gray-400 mt-0.5">{detail.catatan}</span>
+                                                  )}
+                                              </td>
                                               <td className="px-6 py-4 text-gray-700">
                                                   {member ? member.companyName : (station ? station.name : '-')}
                                               </td>
@@ -670,6 +726,7 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                               const cyl = petaTabung.get(t.cylinderId ?? '');
                               const member = petaPelanggan.get(t.memberId ?? '');
                               const station = petaVendor.get(t.refillStationId ?? '');
+                              const detail = detailBaris(t, cyl?.serialCode);
                               return (
                                   <div key={t.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-2">
                                       <div className="flex justify-between items-center gap-2">
@@ -680,7 +737,12 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                                               {new Date(t.date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
                                           </span>
                                       </div>
-                                      <BarisKartu label="Item">{sebutanBarang(t, cyl?.serialCode)}</BarisKartu>
+                                      <BarisKartu label="Item">
+                                          {detail.utama}
+                                          {detail.catatan && (
+                                              <span className="block text-[11px] text-gray-400 mt-0.5">{detail.catatan}</span>
+                                          )}
+                                      </BarisKartu>
                                       <BarisKartu label="Pihak">{member ? member.companyName : (station ? station.name : '-')}</BarisKartu>
                                       <BarisKartu label="Jumlah">
                                           <span className="font-bold">{t.cost ? formatIDR(t.cost) : '-'}</span>
@@ -770,6 +832,45 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                           <h3 className={`text-2xl font-bold ${netProfit >= 0 ? 'text-indigo-700' : 'text-orange-600'}`}>{formatIDR(netProfit)}</h3>
                       </div>
                   </div>
+              </div>
+
+              {/* Pendapatan Regulator -- bagian DARI Total Pemasukan, bukan tambahan.
+                  Nominalnya sudah lama tersimpan di kolom transaksi, tapi belum pernah
+                  punya tempat di layar mana pun: satu-satunya cara mengetahuinya adalah
+                  membuka database. */}
+              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                  <div className="flex items-start justify-between gap-3 mb-4">
+                      <div>
+                          <h3 className="font-bold text-gray-800">Pendapatan Regulator</h3>
+                          <p className="text-xs text-gray-500 mt-0.5">Sudah termasuk di Total Pemasukan, bukan tambahan di luarnya.</p>
+                      </div>
+                      <span className="text-sm font-bold text-gray-500 whitespace-nowrap">{formatIDR(rekapRegulator.total)}</span>
+                  </div>
+
+                  {rekapRegulator.total > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+                              <p className="text-xs uppercase font-bold text-gray-500 flex items-center gap-1.5">
+                                  <span className="material-icons text-base text-gray-400">swap_horiz</span>
+                                  Disewakan
+                              </p>
+                              <p className="text-xl font-bold text-indigo-600 mt-1">{formatIDR(rekapRegulator.sewa)}</p>
+                              <p className="text-xs text-gray-500">{rekapRegulator.unitSewa} unit keluar</p>
+                          </div>
+                          <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+                              <p className="text-xs uppercase font-bold text-gray-500 flex items-center gap-1.5">
+                                  <span className="material-icons text-base text-gray-400">sell</span>
+                                  Terjual
+                              </p>
+                              <p className="text-xl font-bold text-green-600 mt-1">{formatIDR(rekapRegulator.jual)}</p>
+                              <p className="text-xs text-gray-500">{rekapRegulator.unitJual} unit terjual</p>
+                          </div>
+                      </div>
+                  ) : (
+                      <div className="h-24 flex items-center justify-center text-gray-400 text-sm text-center px-4">
+                          Belum ada sewa atau penjualan regulator yang tercatat.
+                      </div>
+                  )}
               </div>
 
               {/* Pengeluaran per Pos -- memecah kartu Total Pengeluaran di atas supaya

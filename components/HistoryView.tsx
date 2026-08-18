@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Cylinder, Transaction, Member, RefillStation } from '../types';
 import { sebutanBarang } from '../lib/bulkStock';
+import { frasaKeluar } from '../lib/regulator';
 import { labelJenisTransaksi } from '../labels';
 import { usePaginasi } from '../lib/usePaginasi';
 import Paginasi from './Paginasi';
@@ -79,7 +80,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ transactions, cylinders, memb
                             // Tentukan tampilan berdasarkan tipe transaksi
                             switch (tx.type) {
                                 case 'RENTAL_OUT':
-                                    description = `Menyewakan ${sebutanBarang(tx, cyl?.serialCode)} ke ${member?.companyName}`;
+                                    description = `${frasaKeluar(tx, cyl?.serialCode)} ke ${member?.companyName}`;
                                     icon = 'shopping_cart_checkout';
                                     colorClass = 'text-blue-600 bg-blue-50';
                                     break;

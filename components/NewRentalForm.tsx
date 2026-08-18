@@ -1,24 +1,37 @@
 import React, { useState, useMemo } from 'react';
 import { Cylinder, CylinderStatus, Member, MetodeBayar, RentalTariff, Transaction } from '../types';
 import { totalRegulatorBeredar } from '../lib/bulkStock';
+import { tarifRegulatorAktif } from '../lib/regulator';
 import PilihMetodeBayar from './PilihMetodeBayar';
 
 export interface NewRentalItem {
   /** Kosong untuk baris curah -- botolnya tidak berkode, jadi tidak ada unit tertentu. */
   cylinderId?: string;
   serialCode?: string;
-  gasType: string;
-  size: string;
-  /** Selalu 1 untuk tabung berkode; bisa lebih untuk stok curah. */
+  /**
+   * Kosong pada baris regulator: barisnya memang bukan tabung.
+   *
+   * Regulator dulu ditempelkan ke baris tabung sebagai dua centang. Bentuk itu
+   * membuatnya mustahil dipilih tanpa tabung berkode di keranjang -- padahal
+   * regulator disewakan dan dijual sendiri, dan tabung yang paling sering keluar
+   * di toko ini justru yang tanpa kode.
+   */
+  gasType?: string;
+  size?: string;
+  /** Botol pada baris tabung, unit pada baris regulator. Selalu 1 untuk tabung berkode. */
   quantity: number;
   /** Nominal PER BOTOL. Total baris = nominal x quantity. */
   depositAmount: number;
   rentalFee: number;
   gasPrice: number;
+  /**
+   * Hanya pada baris regulator. Berbeda dengan nominal di atas, keduanya sudah
+   * TOTAL satu baris (harga x unit) -- bentuk yang sama dipakai kolom transaksi.
+   * Sewa dan jual tidak pernah ada pada baris yang sama: kantong stoknya berbeda,
+   * dan pembatalan transaksi memulihkan stok per baris.
+   */
   regulatorTariffId?: string;
-  regulatorRented?: boolean;
   regulatorFee?: number;
-  regulatorSold?: boolean;
   regulatorSalePrice?: number;
 }
 
@@ -64,13 +77,26 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
   const formatIDR = (v: number) =>
     new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(v || 0);
 
-  const tarifRegulator = useMemo(
-    () => tariffs.find(t => t.kind === 'REGULATOR' && t.isActive),
-    [tariffs]
-  );
+  const tarifRegulator = useMemo(() => tarifRegulatorAktif(tariffs), [tariffs]);
+
+  // Berapa unit regulator yang mau disewa dan dibeli. Berdiri sendiri di luar
+  // keranjang tabung -- keduanya boleh nol, dan boleh juga jadi satu-satunya isi
+  // transaksi.
+  const [regSewaQty, setRegSewaQty] = useState(0);
+  const [regJualQty, setRegJualQty] = useState(0);
 
   const cariTarif = (gasType?: string, size?: string) =>
     tariffs.find(t => t.kind === 'CYLINDER' && t.isActive && t.gasType === gasType && t.size === size);
+
+  /**
+   * Tarif untuk kombinasi ini tanpa mempedulikan aktif atau tidak.
+   *
+   * Dipakai hanya untuk menjelaskan penolakan. "Belum ada tarif" dan "tarifnya ada
+   * tapi belum diaktifkan" menuntut tindakan yang berbeda di Master Data, dan
+   * menyamakan keduanya membuat operator mencari baris yang sebetulnya sudah ada.
+   */
+  const cariTarifApaPun = (gasType?: string, size?: string) =>
+    tariffs.find(t => t.kind === 'CYLINDER' && t.gasType === gasType && t.size === size);
 
   // Ukuran tanpa kode: botolnya saling gantikan, jadi dipilih lewat jumlah,
   // bukan lewat pencarian kode tabung.
@@ -103,26 +129,27 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
   }, [cariMember, members]);
 
   /**
-   * Stok regulator tersisa untuk SATU baris keranjang tertentu: kepemilikan
-   * dikurangi yang sudah beredar (transaksi lama) dan yang sudah dipilih di
-   * baris keranjang lain -- baris itu sendiri tidak ikut dikurangi, supaya
-   * centangnya tidak langsung terkunci begitu dipilih.
+   * Batas atas yang boleh dipilih. Sewa dan jual memakai kantong stok yang
+   * berbeda -- bekas disewakan, baru dijual putus -- jadi keduanya tidak saling
+   * mengurangi. Yang bekas dikurangi unit yang sedang beredar di pelanggan,
+   * diturunkan dari transaksi, karena menyewakan tidak mengubah kepemilikan.
    */
-  const sisaRegulator = (idxSaatIni: number) => {
+  const stokRegulator = useMemo(() => {
     if (!tarifRegulator) return { sisaSewa: 0, sisaJual: 0 };
-    const dipakaiSewa = keranjang.filter((k, i) => i !== idxSaatIni && k.regulatorRented).length;
-    const dipakaiJual = keranjang.filter((k, i) => i !== idxSaatIni && k.regulatorSold).length;
     const beredar = totalRegulatorBeredar(transactions, tarifRegulator.id);
     return {
-      sisaSewa: Math.max(0, (tarifRegulator.regulatorUsedStock || 0) - beredar - dipakaiSewa),
-      sisaJual: Math.max(0, (tarifRegulator.regulatorNewStock || 0) - dipakaiJual),
+      sisaSewa: Math.max(0, (tarifRegulator.regulatorUsedStock || 0) - beredar),
+      sisaJual: Math.max(0, tarifRegulator.regulatorNewStock || 0),
     };
-  };
+  }, [tarifRegulator, transactions]);
 
   const tambahTabung = (c: Cylinder) => {
     const tarif = cariTarif(c.gasType, c.size);
     if (!tarif) {
-      setError(`Belum ada tarif aktif untuk ${c.gasType} ${c.size}. Atur dulu di Master Data Penyewaan.`);
+      const nonaktif = cariTarifApaPun(c.gasType, c.size);
+      setError(nonaktif
+        ? `Tarif ${c.gasType} ${c.size} masih nonaktif. Nyalakan sakelarnya di Master Data \u2192 Tarif Tabung, dan isi dulu deposit serta biaya sewanya.`
+        : `Belum ada tarif untuk ${c.gasType} ${c.size}. Buat dulu barisnya di Master Data \u2192 Tarif Tabung.`);
       return;
     }
     setError(null);
@@ -167,24 +194,54 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
 
   const hapusItem = (idx: number) => setKeranjang(prev => prev.filter((_, i) => i !== idx));
 
+  const hargaSewaRegulator = Number(tarifRegulator?.rentalFee) || 0;
+  const hargaJualRegulator = Number(tarifRegulator?.salePrice) || 0;
+
   const total = useMemo(() => {
     // Nominal pada tiap baris berlaku PER BOTOL; baris curah bisa lebih dari satu.
     const deposit = keranjang.reduce((s, i) => s + i.depositAmount * i.quantity, 0);
     const sewa = keranjang.reduce((s, i) => s + i.rentalFee * i.quantity, 0);
     const gas = keranjang.reduce((s, i) => s + i.gasPrice * i.quantity, 0);
-    const regSewa = keranjang.reduce((s, i) => s + (i.regulatorFee || 0), 0);
-    const regJual = keranjang.reduce((s, i) => s + (i.regulatorSalePrice || 0), 0);
+    const regSewa = regSewaQty * hargaSewaRegulator;
+    const regJual = regJualQty * hargaJualRegulator;
     const pendapatan = sewa + gas + regSewa + regJual;
     return { deposit, sewa, gas, regSewa, regJual, pendapatan, bayar: pendapatan + deposit };
-  }, [keranjang]);
+  }, [keranjang, regSewaQty, regJualQty, hargaSewaRegulator, hargaJualRegulator]);
 
   const memberLama = members.find(m => m.id === memberLamaId);
 
+  /**
+   * Regulator saja sudah cukup untuk disimpan. Sebelumnya keranjang tabung wajib
+   * berisi, dan itu membuat pelanggan yang cuma membeli regulator tidak punya cara
+   * dicatat sama sekali.
+   */
+  const adaBarang = keranjang.length > 0 || regSewaQty > 0 || regJualQty > 0;
+
   const bolehSimpan =
-    keranjang.length > 0 &&
+    adaBarang &&
     (pelangganBaru
       ? nama.trim() && alamat.trim() && ktp.trim() && telepon.trim()
       : Boolean(memberLamaId));
+
+  /**
+   * Regulator dicatat sebagai barisnya sendiri, terpisah dari tabung dan terpisah
+   * antara sewa dan jual. Satu baris satu peristiwa: itu yang membuat pembatalan
+   * transaksi bisa memulihkan stok yang benar, dan yang membuat laporan bisa
+   * memisahkan pendapatan regulator tanpa menebak.
+   */
+  const barisRegulator = (): NewRentalItem[] => {
+    if (!tarifRegulator) return [];
+    const baris: NewRentalItem[] = [];
+    const kosong = { quantity: 0, depositAmount: 0, rentalFee: 0, gasPrice: 0, regulatorTariffId: tarifRegulator.id };
+
+    if (regSewaQty > 0) {
+      baris.push({ ...kosong, quantity: regSewaQty, regulatorFee: regSewaQty * hargaSewaRegulator });
+    }
+    if (regJualQty > 0) {
+      baris.push({ ...kosong, quantity: regJualQty, regulatorSalePrice: regJualQty * hargaJualRegulator });
+    }
+    return baris;
+  };
 
   const handleSubmit = async () => {
     if (!bolehSimpan || busy) return;
@@ -204,7 +261,7 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
             },
         rentalDate: new Date(tanggal).toISOString(),
         source: sumber,
-        items: keranjang,
+        items: [...keranjang, ...barisRegulator()],
         totals: { deposit: total.deposit, revenue: total.pendapatan },
         metodeBayar,
       });
@@ -214,6 +271,47 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
       setBusy(false);
     }
   };
+
+  /**
+   * Satu kartu penambah unit regulator. Bentuknya sengaja sama dengan penghitung
+   * pengembalian regulator di layar Toko -- alat yang sama untuk pekerjaan yang
+   * sama, cuma arahnya berlawanan.
+   */
+  const kartuRegulator = ({ judul, harga, sisa, qty, setQty, ikon, aktif }: {
+    judul: string; harga: number; sisa: number; qty: number;
+    setQty: (n: number) => void; ikon: string; aktif: string;
+  }) => (
+    <div className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${qty > 0 ? aktif : 'bg-white border-gray-200'}`}>
+      <div className="min-w-0">
+        <p className="font-bold text-sm text-gray-800 flex items-center gap-1.5">
+          <span className="material-icons text-base text-gray-400">{ikon}</span>
+          <span className="truncate">{judul}</span>
+        </p>
+        <p className="text-xs text-gray-500 mt-0.5">
+          {formatIDR(harga)} / unit &middot; {sisa > 0 ? `sisa ${sisa} unit` : 'stok habis'}
+        </p>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={() => setQty(Math.max(0, qty - 1))}
+          disabled={qty <= 0}
+          className="w-8 h-8 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-30 text-gray-600 flex items-center justify-center"
+        >
+          <span className="material-icons text-sm">remove</span>
+        </button>
+        <span className="w-8 text-center font-bold text-gray-800">{qty}</span>
+        <button
+          type="button"
+          onClick={() => setQty(Math.min(sisa, qty + 1))}
+          disabled={qty >= sisa}
+          className="w-8 h-8 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-30 text-gray-600 flex items-center justify-center"
+        >
+          <span className="material-icons text-sm">add</span>
+        </button>
+      </div>
+    </div>
+  );
 
   const inputClass = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none';
   const labelClass = 'block text-xs font-bold text-gray-500 uppercase mb-1.5';
@@ -375,19 +473,28 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
             <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
               {hasilCariTabung.map(c => {
                 const tarif = cariTarif(c.gasType, c.size);
+                // Tabung yang tarifnya belum aktif tetap ditampilkan, tapi tidak bisa
+                // dipilih: menyembunyikannya membuat operator mengira tabungnya hilang
+                // dari sistem, padahal yang kurang cuma satu sakelar di Master Data.
+                const nonaktif = !tarif && Boolean(cariTarifApaPun(c.gasType, c.size));
                 return (
                   <button
                     key={c.id}
                     onClick={() => tambahTabung(c)}
-                    className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 border-b border-gray-50 last:border-0 flex justify-between items-center"
+                    disabled={!tarif}
+                    className={`w-full text-left px-4 py-2.5 border-b border-gray-50 last:border-0 flex justify-between items-center gap-2 ${(tarif ? 'hover:bg-indigo-50' : 'bg-gray-50 cursor-not-allowed')}`}
                   >
-                    <span>
+                    <span className="min-w-0">
                       <span className="text-sm font-bold text-gray-800 font-mono">{c.serialCode}</span>
                       <span className="text-xs text-gray-500 ml-2">{c.gasType} {c.size}</span>
                     </span>
-                    {tarif
-                      ? <span className="text-xs text-green-600 font-medium">{formatIDR(Number(tarif.depositAmount) + Number(tarif.rentalFee) + Number(tarif.gasPrice))}</span>
-                      : <span className="text-xs text-red-500 font-medium">tarif belum diatur</span>}
+                    {tarif ? (
+                      <span className="text-xs text-green-600 font-medium whitespace-nowrap">{formatIDR(Number(tarif.depositAmount) + Number(tarif.rentalFee) + Number(tarif.gasPrice))}</span>
+                    ) : (
+                      <span className={`text-xs font-medium whitespace-nowrap ${(nonaktif ? 'text-amber-600' : 'text-red-500')}`}>
+                        {nonaktif ? 'tarif belum aktif' : 'tarif belum diatur'}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -447,60 +554,60 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
                     />
                   </div>
                 </div>
-
-                {/* Regulator dipasangkan ke unit tertentu, jadi hanya untuk baris berkode. */}
-                {tarifRegulator && it.cylinderId && (() => {
-                  const { sisaSewa, sisaJual } = sisaRegulator(idx);
-                  return (
-                    <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <label className={`flex items-center gap-2 text-sm rounded-lg border px-3 py-2 ${sisaSewa > 0 || it.regulatorRented ? 'border-gray-200 cursor-pointer' : 'border-gray-100 text-gray-300 cursor-not-allowed'}`}>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(it.regulatorRented)}
-                          disabled={!it.regulatorRented && sisaSewa <= 0}
-                          onChange={e => ubahItem(idx, {
-                            regulatorRented: e.target.checked,
-                            regulatorTariffId: (e.target.checked || it.regulatorSold) ? tarifRegulator.id : undefined,
-                            regulatorFee: e.target.checked ? Number(tarifRegulator.rentalFee) : undefined,
-                          })}
-                          className="rounded border-gray-300"
-                        />
-                        Sewa Regulator ({formatIDR(tarifRegulator.rentalFee)})
-                        {sisaSewa <= 0 && !it.regulatorRented && <span className="text-[10px]">stok habis</span>}
-                      </label>
-                      <label className={`flex items-center gap-2 text-sm rounded-lg border px-3 py-2 ${sisaJual > 0 || it.regulatorSold ? 'border-gray-200 cursor-pointer' : 'border-gray-100 text-gray-300 cursor-not-allowed'}`}>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(it.regulatorSold)}
-                          disabled={!it.regulatorSold && sisaJual <= 0}
-                          onChange={e => ubahItem(idx, {
-                            regulatorSold: e.target.checked,
-                            regulatorTariffId: (e.target.checked || it.regulatorRented) ? tarifRegulator.id : undefined,
-                            regulatorSalePrice: e.target.checked ? Number(tarifRegulator.salePrice) : undefined,
-                          })}
-                          className="rounded border-gray-300"
-                        />
-                        Beli Regulator ({formatIDR(tarifRegulator.salePrice)})
-                        {sisaJual <= 0 && !it.regulatorSold && <span className="text-[10px]">stok habis</span>}
-                      </label>
-                    </div>
-                  );
-                })()}
               </div>
             ))}
           </div>
         )}
+      </div>
 
-        {tarifRegulator && (tarifRegulator.regulatorNewStock || 0) === 0 && (tarifRegulator.regulatorUsedStock || 0) === 0 && (
-          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-3">
-            Stok regulator masih kosong, jadi pilihan sewa dan beli regulator belum bisa dipakai. Isi stoknya di Master Data &rarr; Tarif Regulator.
+      {/* 3. REGULATOR -- bagiannya sendiri, bukan centang di dalam baris tabung. */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        <h3 className="font-bold text-gray-800 mb-1">3. Regulator</h3>
+        <p className="text-xs text-gray-500 mb-4">
+          Boleh disewa atau dibeli, bersama tabung apa pun maupun tanpa tabung sama sekali.
+          Yang disewakan adalah regulator bekas; yang dijual putus adalah regulator baru.
+        </p>
+
+        {!tarifRegulator ? (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+            Belum ada tarif regulator yang aktif. Atur dulu di Master Data &rarr; Tarif Regulator.
           </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {kartuRegulator({
+                judul: `Sewa ${tarifRegulator.name || 'Regulator'}`,
+                harga: hargaSewaRegulator,
+                sisa: stokRegulator.sisaSewa,
+                qty: regSewaQty,
+                setQty: setRegSewaQty,
+                ikon: 'swap_horiz',
+                aktif: 'bg-indigo-50 border-indigo-300',
+              })}
+              {kartuRegulator({
+                judul: `Beli ${tarifRegulator.name || 'Regulator'}`,
+                harga: hargaJualRegulator,
+                sisa: stokRegulator.sisaJual,
+                qty: regJualQty,
+                setQty: setRegJualQty,
+                ikon: 'sell',
+                aktif: 'bg-green-50 border-green-300',
+              })}
+            </div>
+
+            {stokRegulator.sisaSewa === 0 && stokRegulator.sisaJual === 0 && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-3">
+                Stok regulator sedang habis, baik yang bekas maupun yang baru. Tambah stoknya di
+                Master Data &rarr; Tarif Regulator.
+              </p>
+            )}
+          </>
         )}
       </div>
 
-      {/* 3. RINGKASAN */}
+      {/* 4. RINGKASAN */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-        <h3 className="font-bold text-gray-800 mb-4">3. Ringkasan Pembayaran</h3>
+        <h3 className="font-bold text-gray-800 mb-4">4. Ringkasan Pembayaran</h3>
         <div className="space-y-2 text-sm">
           <div className="flex justify-between text-gray-600"><span>Biaya sewa tabung</span><span className="font-mono">{formatIDR(total.sewa)}</span></div>
           <div className="flex justify-between text-gray-600"><span>Harga gas</span><span className="font-mono">{formatIDR(total.gas)}</span></div>
@@ -536,7 +643,7 @@ const NewRentalForm: React.FC<NewRentalFormProps> = ({ cylinders, members, tarif
         </div>
         {!bolehSimpan && (
           <p className="text-xs text-gray-400 text-right mt-2">
-            {keranjang.length === 0 ? 'Pilih minimal satu tabung.' : 'Lengkapi data pelanggan dulu.'}
+            {!adaBarang ? 'Pilih minimal satu tabung atau regulator.' : 'Lengkapi data pelanggan dulu.'}
           </p>
         )}
       </div>

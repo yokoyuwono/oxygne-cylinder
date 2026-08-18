@@ -19,6 +19,7 @@ import AntrianIsiView, { BayarPesananPayload, BuatPesananPayload, SerahPesananPa
 import { NewRentalPayload } from './components/NewRentalForm';
 import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, PenukaranTabung, AppUser, UserRole, MemberStatus, GasPrice, GasOrder, RentalTariff, MetodeBayar } from './types';
 import { JENIS_PESANAN } from './lib/antrianIsi';
+import { tarifRegulatorAktif } from './lib/regulator';
 import { bolehKelolaPengguna } from './lib/peran';
 import KasView, { KasPayload } from './components/KasView';
 import { PengeluaranPayload } from './lib/pengeluaran';
@@ -819,8 +820,13 @@ const App: React.FC = () => {
     // -- 2. Harga gas jadi harga tetap pelanggan --
     // Satu baris per kombinasi jenis gas + ukuran; kalau pelanggan menyewa dua
     // tabung sejenis, harga terakhir yang dipakai.
+    // Baris regulator dilewati: barisnya bukan tabung, jadi tidak punya jenis gas
+    // maupun ukuran. Tanpa saringan ini pelanggan mendapat harga tetap
+    // "undefined|undefined" yang tidak akan pernah cocok dengan tabung mana pun.
     const hargaUnik = new Map<string, { gasType: string; size: string; price: number }>();
-    items.forEach(i => hargaUnik.set(`${i.gasType}|${i.size}`, { gasType: i.gasType, size: i.size, price: i.gasPrice }));
+    items
+      .filter(i => i.gasType && i.size)
+      .forEach(i => hargaUnik.set(`${i.gasType}|${i.size}`, { gasType: i.gasType as string, size: i.size as string, price: i.gasPrice }));
 
     const barisHarga = [...hargaUnik.values()].map((h, idx) => ({
       id: `mp-${Date.now()}-${idx}`,
@@ -867,7 +873,7 @@ const App: React.FC = () => {
     // -- 3b. Botol tanpa kode: kurangi jumlah stok yang dimiliki toko --
     // Botolnya pergi bersama pelanggan, jadi kepemilikan toko berkurang. Berbeda
     // dengan tukar isi, yang tidak menggerakkan angka ini sama sekali.
-    for (const item of items.filter(i => !i.cylinderId)) {
+    for (const item of items.filter(i => !i.cylinderId && i.gasType && i.size)) {
       const tarif = tariffs.find(t => t.kind === 'CYLINDER' && t.gasType === item.gasType && t.size === item.size);
       if (!tarif) continue;
       const sisa = Math.max(0, (tarif.stockQty || 0) - item.quantity);
@@ -878,17 +884,22 @@ const App: React.FC = () => {
     // -- 4. Regulator terjual: kepemilikan stok baru berkurang permanen --
     // Regulator sewaan TIDAK menyentuh regulatorUsedStock -- itu perputaran,
     // bukan kepemilikan; yang sedang beredar diturunkan dari transaksi.
-    const regulatorTerjual = items.filter(i => i.regulatorSold && i.regulatorTariffId);
+    //
+    // Jumlahnya diambil dari quantity, bukan dipatok satu. Baris regulator kini
+    // boleh berisi beberapa unit, dan mengurangi satu untuk baris berisi tiga
+    // membuat stok mengambang dua unit yang sebenarnya sudah tidak ada.
+    const regulatorTerjual = items.filter(i => i.regulatorTariffId && (i.regulatorSalePrice || 0) > 0);
     for (const item of regulatorTerjual) {
       const tarif = tariffs.find(t => t.id === item.regulatorTariffId);
       if (!tarif) continue;
-      const sisa = Math.max(0, (tarif.regulatorNewStock || 0) - 1);
+      const sisa = Math.max(0, (tarif.regulatorNewStock || 0) - item.quantity);
       const { error } = await supabase.from('rental_tariffs').update({ regulatorNewStock: sisa }).eq('id', tarif.id);
       if (error) throw new Error(`Gagal memperbarui stok regulator baru: ${error.message}`);
     }
 
-    // -- 5. Transaksi, satu per tabung, rincian dibekukan --
-    // Nominal pada item berlaku per botol; baris curah dikalikan jumlahnya.
+    // -- 5. Transaksi, satu per baris keranjang, rincian dibekukan --
+    // Nominal pada item berlaku per botol; baris curah dikalikan jumlahnya. Nominal
+    // regulator sudah total satu baris, jadi tidak dikalikan lagi di sini.
     const newTransactions: Transaction[] = items.map((i, idx) => ({
       id: `t-new-${Date.now()}-${idx}`,
       cylinderId: i.cylinderId,
@@ -904,9 +915,9 @@ const App: React.FC = () => {
       regulatorFee: i.regulatorFee,
       regulatorSalePrice: i.regulatorSalePrice,
       regulatorTariffId: i.regulatorTariffId,
-      regulatorQty: i.regulatorTariffId ? 1 : undefined,
+      regulatorQty: i.regulatorTariffId ? i.quantity : undefined,
       quantity: i.quantity,
-      size: i.size as CylinderSize,
+      size: i.size as CylinderSize | undefined,
     }));
 
     const { error: errTx } = await supabase.from('transactions').insert(newTransactions);
@@ -1247,13 +1258,29 @@ const App: React.FC = () => {
     returnRegulatorQty: number = 0,
     returnBulkQty: Record<string, number> = {},
     // Kosong untuk sewa yang dibayar nanti -- uangnya belum berpindah.
-    metodeBayar?: MetodeBayar
+    metodeBayar?: MetodeBayar,
+    /**
+     * Regulator yang ikut KELUAR pada transaksi ini -- lawan dari returnRegulatorQty
+     * yang masuk. Dijadikan satu objek, bukan dua argumen: tanda tangan ini sudah
+     * sembilan parameter, dan sewa dan jual memang selalu diputuskan bersamaan.
+     */
+    regulatorKeluar: { sewa: number; jual: number } = { sewa: 0, jual: 0 }
   ) => {
     const member = members.find(m => m.id === memberId);
     if (!member) return;
 
     const date = new Date().toISOString();
     const newTransactions: Transaction[] = [];
+
+    // Regulator yang keluar bersama transaksi ini. Nominalnya dihitung lebih dulu
+    // karena ikut menentukan besar utang kalau pelanggan memilih bayar nanti --
+    // regulator yang dibawa pulang tanpa dibayar tetap tagihan, sama seperti gas.
+    const tarifRegulatorKeluar = tarifRegulatorAktif(tariffs);
+    const regSewa = tarifRegulatorKeluar ? Math.max(0, regulatorKeluar.sewa) : 0;
+    const regJual = tarifRegulatorKeluar ? Math.max(0, regulatorKeluar.jual) : 0;
+    const nilaiRegSewa = regSewa * (Number(tarifRegulatorKeluar?.rentalFee) || 0);
+    const nilaiRegJual = regJual * (Number(tarifRegulatorKeluar?.salePrice) || 0);
+    const totalRegulator = nilaiRegSewa + nilaiRegJual;
 
     // Botol tanpa kode yang dikembalikan: stok toko bertambah lagi, deposit
     // dikembalikan sebanyak botol yang benar-benar kembali, dan satu baris RETURN
@@ -1290,11 +1317,59 @@ const App: React.FC = () => {
       }
     }
 
+    // Regulator yang keluar: satu baris untuk yang disewakan, satu untuk yang dijual.
+    // Dipisah karena kantong stoknya berbeda dan nasibnya berbeda -- yang disewakan
+    // akan ditagih kembali, yang dijual tidak pernah. Bentuknya sama persis dengan
+    // yang ditulis alur Sewa Baru, jadi laporan tidak perlu tahu dari layar mana
+    // barisnya berasal.
+    if (tarifRegulatorKeluar && regSewa > 0) {
+      newTransactions.push({
+        id: `t-reg-sewa-${Date.now()}`,
+        memberId,
+        type: 'RENTAL_OUT',
+        date,
+        cost: nilaiRegSewa,
+        paymentStatus: isUnpaid ? 'UNPAID' : 'PAID',
+        paymentMethod: isUnpaid ? undefined : metodeBayar,
+        regulatorTariffId: tarifRegulatorKeluar.id,
+        regulatorQty: regSewa,
+        regulatorFee: nilaiRegSewa,
+        quantity: regSewa,
+      });
+    }
+
+    if (tarifRegulatorKeluar && regJual > 0) {
+      // Yang dijual keluar dari kepemilikan toko untuk selamanya.
+      const sisaBaru = Math.max(0, (tarifRegulatorKeluar.regulatorNewStock || 0) - regJual);
+      const { error } = await supabase.from('rental_tariffs')
+        .update({ regulatorNewStock: sisaBaru })
+        .eq('id', tarifRegulatorKeluar.id);
+      if (error) throw new Error(`Gagal memperbarui stok regulator baru: ${error.message}`);
+
+      // Tanpa ini form masih menawarkan stok yang sudah terjual sampai halaman
+      // dimuat ulang -- layar ini memang tidak memuat ulang data setelah menyimpan.
+      setTariffs(prev => prev.map(t => (t.id === tarifRegulatorKeluar.id ? { ...t, regulatorNewStock: sisaBaru } : t)));
+
+      newTransactions.push({
+        id: `t-reg-jual-${Date.now()}`,
+        memberId,
+        type: 'RENTAL_OUT',
+        date,
+        cost: nilaiRegJual,
+        paymentStatus: isUnpaid ? 'UNPAID' : 'PAID',
+        paymentMethod: isUnpaid ? undefined : metodeBayar,
+        regulatorTariffId: tarifRegulatorKeluar.id,
+        regulatorQty: regJual,
+        regulatorSalePrice: nilaiRegJual,
+        quantity: regJual,
+      });
+    }
+
     // Regulator sewaan yang ikut dikembalikan bersama tabung. Cuma dicatat
     // sebagai baris RETURN -- regulatorUsedStock (kepemilikan) tidak disentuh,
     // yang sedang beredar diturunkan dari transaksi ini.
     if (returnRegulatorQty > 0) {
-      const tarifRegulator = tariffs.find(t => t.kind === 'REGULATOR' && t.isActive);
+      const tarifRegulator = tarifRegulatorAktif(tariffs);
       if (tarifRegulator) {
         newTransactions.push({
           id: `t-ret-reg-${Date.now()}`,
@@ -1307,9 +1382,10 @@ const App: React.FC = () => {
       }
     }
 
-    // Update Debt
-    if (isUnpaid && totalCost > 0) {
-      const newDebt = member.totalDebt + totalCost;
+    // Update Debt -- regulator ikut, sama seperti gas.
+    const totalTagihan = totalCost + totalRegulator;
+    if (isUnpaid && totalTagihan > 0) {
+      const newDebt = member.totalDebt + totalTagihan;
       await supabase.from('members').update({ totalDebt: newDebt }).eq('id', memberId);
       setMembers(prev => prev.map(m => m.id === memberId ? { ...m, totalDebt: newDebt } : m));
     }

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Cylinder, Transaction, Member, GasOrder, RefillStation, RentalTariff } from '../types';
 import { AMBANG_PESANAN_LAMA, RingkasanAntrian, daftarAntrian } from '../lib/antrianIsi';
 import { sebutanBarang } from '../lib/bulkStock';
+import { frasaKeluar } from '../lib/regulator';
 import {
   ItemTindakan,
   KesiapanStok,
@@ -424,7 +425,7 @@ function ringkasAktivitas(
 
     switch (tx.type) {
       case 'RENTAL_OUT':
-        return baris(tx, `Menyewakan ${barang} ke ${member?.companyName}`, 'shopping_cart_checkout', 'text-blue-600 bg-blue-50');
+        return baris(tx, `${frasaKeluar(tx, cyl?.serialCode)} ke ${member?.companyName}`, 'shopping_cart_checkout', 'text-blue-600 bg-blue-50');
       case 'RETURN':
         return baris(tx, `Menerima ${barang} dari ${member?.companyName}`, 'assignment_return', 'text-green-600 bg-green-50');
       case 'REFILL_OUT':
