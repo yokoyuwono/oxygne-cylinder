@@ -358,7 +358,7 @@ const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, transactions, 
                   {draft.isCoded === false && (
                     <div className="bg-amber-50 border border-amber-100 rounded-lg p-3">
                       {numberField('Jumlah Stok (botol)', 'stockQty',
-                        'Jumlah botol yang dimiliki toko. Tukar isi tidak mengubah angka ini -- botol masuk satu, keluar satu.')}
+                        'Jumlah botol yang dimiliki toko. Tukar isi tidak mengubah angka ini -- botol masuk satu, keluar satu.', 1)}
                     </div>
                   )}
                 </>
