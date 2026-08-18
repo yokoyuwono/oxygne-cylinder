@@ -1,5 +1,5 @@
 import { MetodeBayar, Transaction } from '../types';
-import { barisPendapatan } from './laporanHarian';
+import { uangMasukBaris } from './laporanHarian';
 
 /**
  * Metode bayar dan rekapnya.
@@ -81,9 +81,11 @@ export interface BarisMetode extends KelompokMetode {
  * karena angkanya sedang kecil membuat yang dicari justru paling sulit ditemukan.
  * Kelompok penampung adalah sisa, jadi tempatnya memang di belakang.
  *
- * Memakai ulang predikat barisPendapatan, bukan filter sendiri: kalau keduanya
- * berbeda, rincian dan kartu Pemasukan akan berselisih dan tidak ada yang tahu mana
- * yang benar.
+ * Memakai ulang uangMasukBaris, bukan filter sendiri: kalau keduanya berbeda,
+ * rincian dan kartu Uang Masuk akan berselisih dan tidak ada yang tahu mana yang
+ * benar. Deposit ikut terhitung di sini justru karena itu -- uangnya masuk lewat
+ * laci atau rekening yang sama, dan rincian yang melewatkannya tidak akan pernah
+ * berjumlah sama dengan kartunya.
  */
 export function rekapPemasukanPerMetode(transactions: Transaction[]): BarisMetode[] {
   // Tunai dan transfer selalu muncul, walau nol. Pemisahannya baru bisa dibaca sebagai
@@ -94,11 +96,12 @@ export function rekapPemasukanPerMetode(transactions: Transaction[]): BarisMetod
   );
 
   for (const t of transactions) {
-    if (!barisPendapatan(t)) continue;
+    const nilai = uangMasukBaris(t);
+    if (nilai <= 0) continue;
 
     const metode = kelompokMetode(t);
     const baris = total.get(metode.id) ?? { ...metode, total: 0, persen: 0 };
-    baris.total += t.cost || 0;
+    baris.total += nilai;
     total.set(metode.id, baris);
   }
 

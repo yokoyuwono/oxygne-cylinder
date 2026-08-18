@@ -592,12 +592,19 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
               </div>
 
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                  {/* Pemasukan dipecah di kartunya sendiri, bukan di kartu terpisah di
+                  {/* Uang masuk dipecah di kartunya sendiri, bukan di kartu terpisah di
                       bawah: yang dicari saat membuka laporan adalah baris ringkasan ini,
-                      dan angka yang harus dicocokkan dengan laci ada di sini. */}
+                      dan angka yang harus dicocokkan dengan laci ada di sini.
+
+                      Disebut "Uang Masuk", bukan "Pemasukan", karena deposit jaminan ikut
+                      terhitung -- dan deposit bukan pendapatan. Tab Keuangan memakai kata
+                      "Pemasukan" untuk angka yang memberi makan Laba Bersih; dua layar
+                      dengan satu nama tapi dua arti adalah cara paling mudah membuat orang
+                      salah membaca labanya sendiri. */}
                   <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm col-span-2 lg:col-span-1">
-                      <p className="text-xs text-gray-500 uppercase font-bold">Pemasukan</p>
-                      <p className="text-2xl font-bold text-green-600">{formatIDR(laporanHarian.pemasukan)}</p>
+                      <p className="text-xs text-gray-500 uppercase font-bold">Uang Masuk</p>
+                      <p className="text-2xl font-bold text-green-600">{formatIDR(laporanHarian.uangMasuk)}</p>
+                      <p className="text-[11px] text-gray-400 mt-0.5">Yang harus cocok dengan isi laci dan rekening hari ini.</p>
 
                       {/* Melebar penuh di HP: setengah lebar memotong nama kelompok jadi
                           "Tidak Dic..." -- rincian yang tidak terbaca tidak ada gunanya. */}
@@ -613,23 +620,43 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                           ))}
                       </div>
 
-                      {/* Bukan kelompok metode keempat, jadi dipisah garis putus-putus dan
-                          diberi kata "di antaranya": rincian metode di atas harus tetap
+                      {/* Bukan kelompok metode tambahan, jadi dipisah garis putus-putus dan
+                          diberi kepala "di antaranya": rincian metode di atas harus tetap
                           terbaca sebagai pemecahan yang menjumlah pas ke angka besarnya.
+                          Yang di bawah ini irisan, bukan tambahan.
 
-                          Sewa dan jual dipisah, bukan disatukan jadi satu angka regulator.
+                          Sewa dan jual regulator dipisah, bukan disatukan jadi satu angka.
                           Keduanya kelihatan sama di laporan -- sama-sama rupiah masuk hari
                           itu -- padahal yang satu barangnya akan kembali dan yang satu tidak
                           pernah. Justru pemisahan itu yang dicari saat membuka laporan. */}
-                      {regulatorHarian.total > 0 && (
+                      {(laporanHarian.depositMasuk > 0 || regulatorHarian.total > 0) && (
                           <div className="mt-3 pt-3 border-t border-dashed border-gray-200 space-y-2">
+                              <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Di antaranya</p>
+
+                              {laporanHarian.depositMasuk > 0 && (
+                                  <>
+                                      <div className="flex items-center justify-between gap-2">
+                                          <span className="flex items-center gap-1.5 min-w-0 text-gray-500">
+                                              <span className="material-icons text-sm text-gray-400 shrink-0">savings</span>
+                                              <span className="text-xs truncate">Deposit jaminan</span>
+                                          </span>
+                                          <span className="text-sm font-bold text-gray-800 whitespace-nowrap">{formatIDR(laporanHarian.depositMasuk)}</span>
+                                      </div>
+                                      <p className="text-[11px] text-gray-400 -mt-1 pl-6">
+                                          Titipan pelanggan, dikembalikan saat berhenti menyewa. Tidak dihitung sebagai laba.
+                                      </p>
+                                  </>
+                              )}
+
+                              {regulatorHarian.total > 0 && (
                               <div className="flex items-center justify-between gap-2">
-                                  <span className="flex items-center gap-1.5 min-w-0 text-gray-400">
-                                      <span className="material-icons text-sm shrink-0">settings_input_component</span>
-                                      <span className="text-xs truncate">Di antaranya regulator</span>
+                                  <span className="flex items-center gap-1.5 min-w-0 text-gray-500">
+                                      <span className="material-icons text-sm text-gray-400 shrink-0">settings_input_component</span>
+                                      <span className="text-xs truncate">Regulator</span>
                                   </span>
-                                  <span className="text-sm font-bold text-gray-500 whitespace-nowrap">{formatIDR(regulatorHarian.total)}</span>
+                                  <span className="text-sm font-bold text-gray-800 whitespace-nowrap">{formatIDR(regulatorHarian.total)}</span>
                               </div>
+                              )}
 
                               {regulatorHarian.sewa > 0 && (
                                   <div className="flex items-center justify-between gap-2 pl-4">
@@ -653,9 +680,17 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                           </div>
                       )}
                   </div>
+                  {/* Deposit yang dikembalikan juga uang yang keluar dari laci. Tanpa ini,
+                      hari ketika seorang pelanggan berhenti menyewa akan menyisakan laci
+                      yang kurang tanpa satu baris pun di laporan yang menerangkannya. */}
                   <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                      <p className="text-xs text-gray-500 uppercase font-bold">Pengeluaran</p>
-                      <p className="text-2xl font-bold text-red-600">{formatIDR(laporanHarian.pengeluaran)}</p>
+                      <p className="text-xs text-gray-500 uppercase font-bold">Uang Keluar</p>
+                      <p className="text-2xl font-bold text-red-600">{formatIDR(laporanHarian.uangKeluar)}</p>
+                      {laporanHarian.depositKeluar > 0 && (
+                          <p className="text-[11px] text-gray-400 mt-2 pt-2 border-t border-dashed border-gray-200">
+                              Termasuk {formatIDR(laporanHarian.depositKeluar)} deposit yang dikembalikan.
+                          </p>
+                      )}
                   </div>
                   <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
                       <p className="text-xs text-gray-500 uppercase font-bold">Jumlah Transaksi</p>

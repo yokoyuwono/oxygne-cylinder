@@ -33,6 +33,42 @@ export const barisPengeluaran = (t: Transaction) =>
   (t.type === 'REFILL_IN' || t.type === 'EXPENSE') && (t.cost || 0) > 0;
 
 /**
+ * Deposit jaminan: uang yang berpindah, tapi bukan pendapatan.
+ *
+ * Titipan ini tidak boleh masuk barisPendapatan. Predikat itu memberi makan Laba
+ * Bersih di tab Keuangan, dan deposit yang dihitung sebagai laba akan berbalik jadi
+ * angka bohong pada hari pelanggan mengambilnya kembali -- laba yang pernah dilaporkan
+ * tidak pernah benar-benar jadi milik toko.
+ *
+ * Tapi uangnya nyata dan hari ini ada di laci. Operator yang menghitung laci pada
+ * penutupan hari tidak bisa mencocokkannya dengan laporan yang mengabaikan deposit.
+ * Karena itu deposit dihitung sebagai ARUS KAS harian -- terpisah dari pendapatan,
+ * dan tidak pernah ikut ke perhitungan laba.
+ */
+export const depositMasuk = (t: Transaction) =>
+  t.type === 'RENTAL_OUT' ? Number(t.depositAmount) || 0 : 0;
+
+/**
+ * Deposit yang dikembalikan, dalam dua bentuk yang berbeda kolom.
+ *
+ * Botol curah yang dikembalikan menuliskan titipannya di depositAmount pada baris
+ * RETURN. Pelanggan yang berhenti menyewa menuliskannya di cost pada baris
+ * DEPOSIT_REFUND. Keduanya uang yang keluar dari laci hari itu.
+ */
+export const depositKeluar = (t: Transaction) =>
+  t.type === 'RETURN' ? Number(t.depositAmount) || 0
+    : t.type === 'DEPOSIT_REFUND' ? Number(t.cost) || 0
+    : 0;
+
+/** Rupiah yang benar-benar masuk laci dari satu baris: pendapatan ditambah titipan. */
+export const uangMasukBaris = (t: Transaction) =>
+  (barisPendapatan(t) ? Number(t.cost) || 0 : 0) + depositMasuk(t);
+
+/** Lawannya: belanja, biaya isi ulang, dan titipan yang dikembalikan. */
+export const uangKeluarBaris = (t: Transaction) =>
+  (barisPengeluaran(t) ? Number(t.cost) || 0 : 0) + depositKeluar(t);
+
+/**
  * Tanggal lokal sebuah transaksi dalam bentuk YYYY-MM-DD, siap dibandingkan dengan
  * nilai <input type="date">.
  *
@@ -54,9 +90,16 @@ export const hariIni = () => tanggalLokal(new Date());
 
 export interface LaporanHarian {
   transaksi: Transaction[];
+  /** Pendapatan saja -- angka yang sama dengan yang memberi makan Laba Bersih. */
   pemasukan: number;
   pengeluaran: number;
   jumlahTransaksi: number;
+  /** Titipan yang diterima dan dikembalikan hari itu. Bukan laba, tapi tetap uang. */
+  depositMasuk: number;
+  depositKeluar: number;
+  /** Yang benar-benar harus cocok dengan isi laci: pendapatan + titipan. */
+  uangMasuk: number;
+  uangKeluar: number;
 }
 
 /**
@@ -69,10 +112,21 @@ export function hitungLaporanHarian(transactions: Transaction[], tanggal: string
     .filter(t => tanggalLokal(t.date) === tanggal)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
+  const jumlahkan = (f: (t: Transaction) => number) => transaksi.reduce((n, t) => n + f(t), 0);
+
+  const pemasukan = transaksi.filter(barisPendapatan).reduce((n, t) => n + (t.cost || 0), 0);
+  const pengeluaran = transaksi.filter(barisPengeluaran).reduce((n, t) => n + (t.cost || 0), 0);
+  const masukDeposit = jumlahkan(depositMasuk);
+  const keluarDeposit = jumlahkan(depositKeluar);
+
   return {
     transaksi,
-    pemasukan: transaksi.filter(barisPendapatan).reduce((n, t) => n + (t.cost || 0), 0),
-    pengeluaran: transaksi.filter(barisPengeluaran).reduce((n, t) => n + (t.cost || 0), 0),
+    pemasukan,
+    pengeluaran,
     jumlahTransaksi: transaksi.length,
+    depositMasuk: masukDeposit,
+    depositKeluar: keluarDeposit,
+    uangMasuk: pemasukan + masukDeposit,
+    uangKeluar: pengeluaran + keluarDeposit,
   };
 }
