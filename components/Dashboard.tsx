@@ -4,12 +4,9 @@ import { AMBANG_PESANAN_LAMA, RingkasanAntrian, daftarAntrian } from '../lib/ant
 import { sebutanBarang } from '../lib/bulkStock';
 import { frasaKeluar } from '../lib/regulator';
 import {
-  ItemTindakan,
   KesiapanStok,
-  NadaTindakan,
   RingkasanBon,
   RingkasanSewa,
-  hitungAntrianTindakan,
   hitungBon,
   hitungKesiapanStok,
   hitungSewaTerlama,
@@ -30,10 +27,6 @@ const KARTU = 'bg-white rounded-xl shadow-sm border border-gray-100';
 
 const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members, stations, tariffs, gasOrders }) => {
   const navigate = useNavigate();
-
-  const antrian = useMemo(
-    () => hitungAntrianTindakan(cylinders, transactions, members, tariffs, gasOrders),
-    [cylinders, transactions, members, tariffs, gasOrders]);
 
   const stok = useMemo(
     () => hitungKesiapanStok(cylinders, transactions, tariffs),
@@ -69,8 +62,6 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
         </p>
       </div>
 
-      <AntrianTindakan antrian={antrian} onBuka={navigate} />
-
       <KesiapanStokBlok
         stok={stok}
         onBuka={(status) => navigate(`/inventory?status=${encodeURIComponent(status)}`)}
@@ -92,49 +83,6 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
     </div>
   );
 };
-
-// ------------------------------------------------------------------ Perlu tindakan
-
-const NADA: Record<NadaTindakan, { wadah: string; ikon: string }> = {
-  bahaya: { wadah: 'bg-red-50 border-red-100 hover:bg-red-100', ikon: 'bg-red-100 text-red-600' },
-  peringatan: { wadah: 'bg-amber-50 border-amber-100 hover:bg-amber-100', ikon: 'bg-amber-100 text-amber-600' },
-  info: { wadah: 'bg-green-50 border-green-100 hover:bg-green-100', ikon: 'bg-green-100 text-green-600' },
-};
-
-const AntrianTindakan: React.FC<{ antrian: ItemTindakan[]; onBuka: (tujuan: string) => void }> = ({ antrian, onBuka }) => (
-  <div className={`${KARTU} p-6`}>
-    <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Perlu Tindakan</h2>
-
-    {antrian.length === 0 ? (
-      <div className="flex items-center gap-3 text-gray-500">
-        <span className="material-icons text-green-500">check_circle</span>
-        <p className="text-sm">Tidak ada yang perlu ditindak hari ini.</p>
-      </div>
-    ) : (
-      <div className="space-y-2">
-        {antrian.map(item => {
-          const nada = NADA[item.nada];
-          return (
-            <button
-              key={item.id}
-              onClick={() => onBuka(item.tujuan)}
-              className={`w-full text-left flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${nada.wadah}`}
-            >
-              <span className={`shrink-0 p-2 rounded-lg ${nada.ikon}`}>
-                <span className="material-icons text-lg align-middle">{item.ikon}</span>
-              </span>
-              <span className="flex-1 min-w-0">
-                <span className="block text-sm font-bold text-gray-800">{item.teks}</span>
-                {item.detail && <span className="block text-xs text-gray-600 truncate">{item.detail}</span>}
-              </span>
-              <span className="material-icons text-gray-400 shrink-0">chevron_right</span>
-            </button>
-          );
-        })}
-      </div>
-    )}
-  </div>
-);
 
 // ------------------------------------------------------------------- Kesiapan stok
 
