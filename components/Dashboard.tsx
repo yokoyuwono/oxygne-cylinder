@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Cylinder, Transaction, Member, GasOrder, RefillStation, RentalTariff } from '../types';
+import { Cylinder, Transaction, Member, GasOrder, RefillStation, RentalTariff, CylinderStatus } from '../types';
 import { AMBANG_PESANAN_LAMA, RingkasanAntrian, daftarAntrian } from '../lib/antrianIsi';
 import { sebutanBarang } from '../lib/bulkStock';
 import { frasaKeluar } from '../lib/regulator';
@@ -71,7 +71,10 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
 
       <AntrianTindakan antrian={antrian} onBuka={navigate} />
 
-      <KesiapanStokBlok stok={stok} />
+      <KesiapanStokBlok
+        stok={stok}
+        onBuka={(status) => navigate(`/inventory?status=${encodeURIComponent(status)}`)}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         <div className="lg:col-span-2">
@@ -136,19 +139,24 @@ const AntrianTindakan: React.FC<{ antrian: ItemTindakan[]; onBuka: (tujuan: stri
 // ------------------------------------------------------------------- Kesiapan stok
 
 const UBIN = [
-  { kunci: 'siapSewa' as const, label: 'Siap Sewa', ikon: 'check_circle', warna: 'bg-green-50 text-green-600' },
-  { kunci: 'kosongPerluIsi' as const, label: 'Kosong', ikon: 'local_gas_station', warna: 'bg-orange-50 text-orange-600' },
-  { kunci: 'diVendor' as const, label: 'Di Vendor', ikon: 'factory', warna: 'bg-yellow-50 text-yellow-600' },
-  { kunci: 'dalamPengiriman' as const, label: 'Pengiriman', ikon: 'local_shipping', warna: 'bg-cyan-50 text-cyan-600' },
+  { kunci: 'siapSewa' as const, label: 'Siap Sewa', ikon: 'check_circle', warna: 'bg-green-50 text-green-600', status: CylinderStatus.Available },
+  { kunci: 'kosongPerluIsi' as const, label: 'Kosong', ikon: 'local_gas_station', warna: 'bg-orange-50 text-orange-600', status: CylinderStatus.EmptyRefill },
+  { kunci: 'diVendor' as const, label: 'Di Vendor', ikon: 'factory', warna: 'bg-yellow-50 text-yellow-600', status: CylinderStatus.Refilling },
+  { kunci: 'dalamPengiriman' as const, label: 'Pengiriman', ikon: 'local_shipping', warna: 'bg-cyan-50 text-cyan-600', status: CylinderStatus.Delivery },
 ];
 
-const KesiapanStokBlok: React.FC<{ stok: KesiapanStok }> = ({ stok }) => (
+const KesiapanStokBlok: React.FC<{ stok: KesiapanStok; onBuka: (status: CylinderStatus) => void }> = ({ stok, onBuka }) => (
   <div className={`${KARTU} p-6 space-y-5`}>
     <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Kesiapan Stok</h2>
 
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       {UBIN.map(u => (
-        <div key={u.kunci} className="flex items-center gap-3">
+        <button
+          key={u.kunci}
+          type="button"
+          onClick={() => onBuka(u.status)}
+          className="flex items-center gap-3 text-left rounded-xl -m-2 p-2 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+        >
           <span className={`shrink-0 p-3 rounded-xl ${u.warna}`}>
             <span className="material-icons align-middle">{u.ikon}</span>
           </span>
@@ -156,7 +164,7 @@ const KesiapanStokBlok: React.FC<{ stok: KesiapanStok }> = ({ stok }) => (
             <p className="text-2xl font-bold text-gray-800 leading-tight">{stok[u.kunci]}</p>
             <p className="text-xs text-gray-500">{u.label}</p>
           </div>
-        </div>
+        </button>
       ))}
     </div>
 
