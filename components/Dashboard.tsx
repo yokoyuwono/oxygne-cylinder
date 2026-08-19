@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Cylinder, Transaction, Member, GasOrder, RefillStation, RentalTariff, CylinderStatus } from '../types';
 import { AMBANG_PESANAN_LAMA, RingkasanAntrian, daftarAntrian } from '../lib/antrianIsi';
+import { LaporanHarian, hariIni, hitungLaporanHarian } from '../lib/laporanHarian';
 import {
   KesiapanStok,
   RingkasanBon,
@@ -25,6 +26,10 @@ const KARTU = 'bg-white rounded-xl shadow-sm border border-gray-100';
 
 const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members, stations, tariffs, gasOrders }) => {
   const navigate = useNavigate();
+
+  const laporan = useMemo(
+    () => hitungLaporanHarian(transactions, hariIni()),
+    [transactions]);
 
   const stok = useMemo(
     () => hitungKesiapanStok(cylinders, transactions, tariffs),
@@ -56,6 +61,8 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
         </p>
       </div>
 
+      <RingkasanHariIni laporan={laporan} onBuka={() => navigate('/kas')} />
+
       <KesiapanStokBlok
         stok={stok}
         onBuka={(status) => navigate(`/inventory?status=${encodeURIComponent(status)}`)}
@@ -76,6 +83,48 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
   );
 };
 
+// -------------------------------------------------------------- Ringkasan hari ini
+
+/**
+ * Yang pertama dilihat pemilik tiap pagi: uang masuk/keluar hari ini, bukan
+ * kemarin atau bulan ini. Memakai ulang hitungLaporanHarian yang sama dengan
+ * Laporan -- kalau Beranda menghitung sendiri, dua angka bisa beda dan tidak ada
+ * yang tahu mana yang benar (pola yang sama dipakai di Antrian Isi di bawah).
+ */
+const RingkasanHariIni: React.FC<{ laporan: LaporanHarian; onBuka: () => void }> = ({ laporan, onBuka }) => {
+  const bersih = laporan.uangMasuk - laporan.uangKeluar;
+
+  return (
+    <button
+      type="button"
+      onClick={onBuka}
+      className={`${KARTU} p-6 w-full text-left transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-200`}
+    >
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Ringkasan Hari Ini</h2>
+        <span className="text-xs text-gray-400">{laporan.jumlahTransaksi} transaksi</span>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <div>
+          <p className="text-xs text-gray-500 mb-1">Uang Masuk</p>
+          <p className="text-xl font-bold text-green-600">{formatIDR(laporan.uangMasuk)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-500 mb-1">Uang Keluar</p>
+          <p className="text-xl font-bold text-rose-600">{formatIDR(laporan.uangKeluar)}</p>
+        </div>
+        <div className="col-span-2 sm:col-span-1">
+          <p className="text-xs text-gray-500 mb-1">Selisih Bersih</p>
+          <p className={`text-xl font-bold ${bersih >= 0 ? 'text-gray-800' : 'text-rose-600'}`}>
+            {bersih >= 0 ? '+' : ''}{formatIDR(bersih)}
+          </p>
+        </div>
+      </div>
+    </button>
+  );
+};
+
 // ------------------------------------------------------------------- Kesiapan stok
 
 const UBIN = [
@@ -85,64 +134,86 @@ const UBIN = [
   { kunci: 'dalamPengiriman' as const, label: 'Pengiriman', ikon: 'local_shipping', warna: 'bg-cyan-50 text-cyan-600', status: CylinderStatus.Delivery },
 ];
 
-const KesiapanStokBlok: React.FC<{ stok: KesiapanStok; onBuka: (status: CylinderStatus) => void }> = ({ stok, onBuka }) => (
-  <div className={`${KARTU} p-6 space-y-5`}>
-    <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Kesiapan Stok</h2>
+const KesiapanStokBlok: React.FC<{ stok: KesiapanStok; onBuka: (status: CylinderStatus) => void }> = ({ stok, onBuka }) => {
+  // Total armada gudang -- di luar yang sedang disewa (dihitung terpisah di blok
+  // Tabung di Tangan Pelanggan). Persentase ini menjawab "8 Siap Sewa itu bagus atau
+  // tidak?" tanpa harus pemilik menjumlahkan sendiri di kepala.
+  const totalGudang = stok.siapSewa + stok.kosongPerluIsi + stok.diVendor + stok.dalamPengiriman;
+  const persenSiap = totalGudang > 0 ? Math.round((stok.siapSewa / totalGudang) * 100) : 0;
 
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      {UBIN.map(u => (
-        <button
-          key={u.kunci}
-          type="button"
-          onClick={() => onBuka(u.status)}
-          className="flex items-center gap-3 text-left rounded-xl -m-2 p-2 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-        >
-          <span className={`shrink-0 p-3 rounded-xl ${u.warna}`}>
-            <span className="material-icons align-middle">{u.ikon}</span>
-          </span>
-          <div className="min-w-0">
-            <p className="text-2xl font-bold text-gray-800 leading-tight">{stok[u.kunci]}</p>
-            <p className="text-xs text-gray-500">{u.label}</p>
-          </div>
-        </button>
-      ))}
-    </div>
-
-    {(stok.curah.length > 0 || stok.regulator.length > 0) && (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-gray-100">
-        {stok.curah.length > 0 && (
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2">Botol Curah</p>
-            <ul className="space-y-1">
-              {stok.curah.map(c => (
-                <li key={`${c.gasType}-${c.size}`} className="text-sm text-gray-700 flex justify-between items-baseline gap-2">
-                  <span className="text-gray-500 truncate min-w-0">{c.gasType} {c.size}</span>
-                  <span className="font-bold shrink-0 whitespace-nowrap">{c.qty} botol</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {stok.regulator.length > 0 && (
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2">Regulator</p>
-            <ul className="space-y-1">
-              {stok.regulator.map(r => (
-                <li key={r.nama} className="text-sm text-gray-700 flex justify-between items-baseline gap-2">
-                  <span className="text-gray-500 truncate min-w-0">{r.nama}</span>
-                  <span className="font-bold shrink-0 whitespace-nowrap">
-                    {r.tersediaSewa} sewa <span className="text-gray-300">·</span> {r.stokBaru} baru
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
+  return (
+    <div className={`${KARTU} p-6 space-y-5`}>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider">Kesiapan Stok</h2>
+        {totalGudang > 0 && (
+          <span className="text-xs font-bold text-gray-500">{persenSiap}% siap dari {totalGudang} tabung gudang</span>
         )}
       </div>
-    )}
-  </div>
-);
+
+      {totalGudang > 0 && (
+        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+          <div
+            className="h-full bg-green-500 transition-all"
+            style={{ width: `${persenSiap}%` }}
+          />
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {UBIN.map(u => (
+          <button
+            key={u.kunci}
+            type="button"
+            onClick={() => onBuka(u.status)}
+            className="flex items-center gap-3 text-left rounded-xl -m-2 p-2 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          >
+            <span className={`shrink-0 p-3 rounded-xl ${u.warna}`}>
+              <span className="material-icons align-middle">{u.ikon}</span>
+            </span>
+            <div className="min-w-0">
+              <p className="text-2xl font-bold text-gray-800 leading-tight">{stok[u.kunci]}</p>
+              <p className="text-xs text-gray-500">{u.label}</p>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {(stok.curah.length > 0 || stok.regulator.length > 0) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-gray-100">
+          {stok.curah.length > 0 && (
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2">Botol Curah</p>
+              <ul className="space-y-1">
+                {stok.curah.map(c => (
+                  <li key={`${c.gasType}-${c.size}`} className="text-sm text-gray-700 flex justify-between items-baseline gap-2">
+                    <span className="text-gray-500 truncate min-w-0">{c.gasType} {c.size}</span>
+                    <span className="font-bold shrink-0 whitespace-nowrap">{c.qty} botol</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {stok.regulator.length > 0 && (
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2">Regulator</p>
+              <ul className="space-y-1">
+                {stok.regulator.map(r => (
+                  <li key={r.nama} className="text-sm text-gray-700 flex justify-between items-baseline gap-2">
+                    <span className="text-gray-500 truncate min-w-0">{r.nama}</span>
+                    <span className="font-bold shrink-0 whitespace-nowrap">
+                      {r.tersediaSewa} sewa <span className="text-gray-300">·</span> {r.stokBaru} baru
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // -------------------------------------------------------------- Tabung di pelanggan
 
