@@ -1,8 +1,6 @@
 import React, { useMemo } from 'react';
 import { Cylinder, Transaction, Member, GasOrder, RefillStation, RentalTariff, CylinderStatus } from '../types';
 import { AMBANG_PESANAN_LAMA, RingkasanAntrian, daftarAntrian } from '../lib/antrianIsi';
-import { sebutanBarang } from '../lib/bulkStock';
-import { frasaKeluar } from '../lib/regulator';
 import {
   KesiapanStok,
   RingkasanBon,
@@ -11,7 +9,7 @@ import {
   hitungKesiapanStok,
   hitungSewaTerlama,
 } from '../lib/beranda';
-import { formatIDR, formatJam, formatTanggal, labelJenisTransaksi } from '../labels';
+import { formatIDR, formatTanggal } from '../labels';
 import { useNavigate } from 'react-router-dom';
 
 interface DashboardProps {
@@ -49,10 +47,6 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
     () => daftarAntrian(gasOrders, members, kodeTabung),
     [gasOrders, members, kodeTabung]);
 
-  const aktivitasTerbaru = useMemo(
-    () => ringkasAktivitas(transactions, cylinders, members, stations),
-    [transactions, cylinders, members, stations]);
-
   return (
     <div className="space-y-6 pb-20 md:pb-0 animate-fade-in-up">
       <div>
@@ -78,8 +72,6 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
           <BonPelanggan bon={bon} onBuka={() => navigate('/bon')} />
         </div>
       </div>
-
-      <AktivitasTerbaru aktivitas={aktivitasTerbaru} onLihatSemua={() => navigate('/history')} />
     </div>
   );
 };
@@ -348,106 +340,6 @@ const AntrianIsiBlok: React.FC<{ antrian: RingkasanAntrian; onBuka: () => void }
           Buka Antrian Isi
         </button>
       </>
-    )}
-  </div>
-);
-
-// --------------------------------------------------------------------- Aktivitas
-
-interface BarisAktivitas {
-  id: string;
-  tanggal: string;
-  keterangan: string;
-  ikon: string;
-  warna: string;
-}
-
-/** Lima transaksi terakhir, sudah diterjemahkan jadi kalimat yang bisa dibaca. */
-function ringkasAktivitas(
-  transactions: Transaction[],
-  cylinders: Cylinder[],
-  members: Member[],
-  stations: RefillStation[]
-): BarisAktivitas[] {
-  const terakhir = [...transactions]
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, 5);
-
-  return terakhir.map(tx => {
-    const cyl = cylinders.find(c => c.id === tx.cylinderId);
-    const member = members.find(m => m.id === tx.memberId);
-    const station = stations.find(s => s.id === tx.refillStationId);
-    const barang = sebutanBarang(tx, cyl?.serialCode);
-
-    switch (tx.type) {
-      case 'RENTAL_OUT':
-        return baris(tx, `${frasaKeluar(tx, cyl?.serialCode)} ke ${member?.companyName}`, 'shopping_cart_checkout', 'text-blue-600 bg-blue-50');
-      case 'RETURN':
-        return baris(tx, `Menerima ${barang} dari ${member?.companyName}`, 'assignment_return', 'text-green-600 bg-green-50');
-      case 'REFILL_OUT':
-        return baris(tx, `Mengirim ${barang} ke ${station?.name}`, 'local_shipping', 'text-orange-600 bg-orange-50');
-      case 'REFILL_IN':
-        return baris(tx, `Menerima kembali ${barang} dari isi ulang`, 'inventory', 'text-indigo-600 bg-indigo-50');
-      case 'DEPOSIT_REFUND':
-        return baris(tx, `Mengembalikan deposit ke ${member?.companyName}`, 'savings', 'text-purple-600 bg-purple-50');
-      case 'DEBT_PAYMENT':
-        return baris(tx, `Pembayaran utang dari ${member?.companyName}`, 'payments', 'text-emerald-600 bg-emerald-50');
-      case 'DEBT_ADD':
-        return baris(tx, `Bon dicatat atas nama ${member?.companyName}`, 'post_add', 'text-amber-600 bg-amber-50');
-      case 'DELIVERY':
-        return baris(tx, `Mengirim ${barang} untuk pengiriman`, 'local_shipping', 'text-cyan-600 bg-cyan-50');
-      case 'GAS_EXCHANGE':
-        // memberId boleh kosong -- tukar isi terbuka untuk pembeli lepas.
-        return baris(tx, `Tukar isi ${sebutanBarang(tx)} ${member ? `untuk ${member.companyName}` : '(pembeli lepas)'}`, 'swap_horiz', 'text-teal-600 bg-teal-50');
-      case 'CYLINDER_SWAP':
-        // Keterangannya menyebut kode seri penggantinya, dan itu satu-satunya isi baris
-        // ini -- tidak ada uang yang berpindah di sini.
-        return baris(tx, `${barang}: ${tx.description || 'ditukar pabrik'}`, 'swap_horiz', 'text-amber-600 bg-amber-50');
-      case 'EXPENSE':
-        return baris(tx, `Biaya operasional: ${tx.description || 'tanpa keterangan'}`, 'receipt_long', 'text-rose-600 bg-rose-50');
-      case 'INCOME':
-        return baris(tx, `Penjualan: ${tx.description || 'tanpa keterangan'}`, 'trending_up', 'text-green-600 bg-green-50');
-      default:
-        // Jenis yang belum dikenal tetap muncul dengan namanya sendiri, bukan
-        // gelembung kosong tanpa teks.
-        return baris(tx, `${labelJenisTransaksi(tx.type)} ${barang}`, 'receipt_long', 'text-gray-600 bg-gray-100');
-    }
-  });
-}
-
-const baris = (tx: Transaction, keterangan: string, ikon: string, warna: string): BarisAktivitas => ({
-  id: tx.id,
-  tanggal: tx.date,
-  keterangan,
-  ikon,
-  warna,
-});
-
-const AktivitasTerbaru: React.FC<{ aktivitas: BarisAktivitas[]; onLihatSemua: () => void }> = ({ aktivitas, onLihatSemua }) => (
-  <div className={`${KARTU} p-6`}>
-    <div className="flex justify-between items-center mb-4">
-      <h2 className="font-bold text-gray-800">Aktivitas Terbaru</h2>
-      <button onClick={onLihatSemua} className="text-sm font-medium text-indigo-600 hover:underline">
-        Lihat Semua
-      </button>
-    </div>
-
-    {aktivitas.length === 0 ? (
-      <p className="text-sm text-gray-400 italic">Belum ada aktivitas.</p>
-    ) : (
-      <div className="space-y-4">
-        {aktivitas.map(a => (
-          <div key={a.id} className="flex items-start gap-4 pb-4 border-b border-gray-50 last:border-0 last:pb-0">
-            <span className={`shrink-0 p-2 rounded-full ${a.warna}`}>
-              <span className="material-icons text-lg align-middle">{a.ikon}</span>
-            </span>
-            <div className="min-w-0">
-              <p className="text-sm text-gray-700">{a.keterangan}</p>
-              <p className="text-xs text-gray-400">{formatTanggal(a.tanggal)} • {formatJam(a.tanggal)}</p>
-            </div>
-          </div>
-        ))}
-      </div>
     )}
   </div>
 );
