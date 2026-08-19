@@ -1,5 +1,6 @@
 ﻿
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Cylinder, CylinderStatus, GasType, CylinderSize, Transaction } from '../types';
 import { labelStatusTabung, formatTanggal } from '../labels';
 import { supabase } from '../lib/supabase';
@@ -23,7 +24,12 @@ const CylinderList: React.FC<CylinderListProps> = ({ cylinders: globalCylinders,
   // -- Filter & Pagination State --
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState<string>('All');
+  const [searchParams] = useSearchParams();
+  const STATUS_VALID = Object.values(CylinderStatus) as string[];
+  const [filterStatus, setFilterStatus] = useState<string>(() => {
+    const dariUrl = searchParams.get('status');
+    return dariUrl && STATUS_VALID.includes(dariUrl) ? dariUrl : 'All';
+  });
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(100); 
 
