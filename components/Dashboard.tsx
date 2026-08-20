@@ -4,6 +4,7 @@ import { AMBANG_PESANAN_LAMA, RingkasanAntrian, daftarAntrian } from '../lib/ant
 import { LaporanHarian, hariIni, hitungLaporanHarian } from '../lib/laporanHarian';
 import {
   KesiapanStok,
+  RincianKodeTabung,
   RingkasanBon,
   RingkasanSewa,
   hitungBon,
@@ -137,6 +138,15 @@ const UBIN = [
   { kunci: 'dalamPengiriman' as const, label: 'Pengiriman', ikon: 'local_shipping', warna: 'bg-cyan-50 text-cyan-600', status: CylinderStatus.Delivery },
 ];
 
+/**
+ * Baris kecil di bawah tiap ubin, mis. "8.M 1.R 2.C2H2".
+ *
+ * Titik dipakai sebagai pemisah supaya angka dan kodenya tidak menyatu jadi satu kata:
+ * "8M" terbaca seperti satu kode tabung, "8.M" jelas delapan tabung berkode M.
+ */
+const formatRincianKode = (rincian: RincianKodeTabung[]): string =>
+  rincian.map(r => `${r.qty}.${r.prefiks}`).join(' ');
+
 const KesiapanStokBlok: React.FC<{ stok: KesiapanStok; onBuka: (status: CylinderStatus) => void }> = ({ stok, onBuka }) => {
   // Total armada gudang -- di luar yang sedang disewa (dihitung terpisah di blok
   // Tabung di Tangan Pelanggan). Persentase ini menjawab "8 Siap Sewa itu bagus atau
@@ -163,22 +173,33 @@ const KesiapanStokBlok: React.FC<{ stok: KesiapanStok; onBuka: (status: Cylinder
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {UBIN.map(u => (
-          <button
-            key={u.kunci}
-            type="button"
-            onClick={() => onBuka(u.status)}
-            className="flex items-center gap-3 text-left rounded-xl -m-2 p-2 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-          >
-            <span className={`shrink-0 p-3 rounded-xl ${u.warna}`}>
-              <span className="material-icons align-middle">{u.ikon}</span>
-            </span>
-            <div className="min-w-0">
-              <p className="text-2xl font-bold text-gray-800 leading-tight">{stok[u.kunci]}</p>
-              <p className="text-xs text-gray-500">{u.label}</p>
-            </div>
-          </button>
-        ))}
+        {UBIN.map(u => {
+          const rincian = stok.rincian[u.kunci];
+          return (
+            <button
+              key={u.kunci}
+              type="button"
+              onClick={() => onBuka(u.status)}
+              className="flex items-center gap-3 text-left rounded-xl -m-2 p-2 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            >
+              <span className={`shrink-0 p-3 rounded-xl ${u.warna}`}>
+                <span className="material-icons align-middle">{u.ikon}</span>
+              </span>
+              <div className="min-w-0">
+                <p className="text-2xl font-bold text-gray-800 leading-tight">{stok[u.kunci]}</p>
+                <p className="text-xs text-gray-500">{u.label}</p>
+                {rincian.length > 0 && (
+                  <p
+                    className="text-[11px] text-gray-400 mt-0.5 truncate"
+                    title={rincian.map(r => `${r.qty} ${r.prefiks}`).join(', ')}
+                  >
+                    {formatRincianKode(rincian)}
+                  </p>
+                )}
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       {(stok.curah.length > 0 || stok.regulator.length > 0) && (

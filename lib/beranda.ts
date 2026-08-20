@@ -13,6 +13,7 @@ import { formatIDR } from '../labels';
 import { AMBANG_PESANAN_LAMA, pesananLama, pesananTertunda } from './antrianIsi';
 import { tarifCurahAktif, totalRegulatorBeredar } from './bulkStock';
 import { hitungSemuaHolding, hitungStatusMasaTunggu } from './memberExit';
+import { peringkatPrefiks, prefiksTabung } from './urutanTabung';
 
 /**
  * Hitungan turunan untuk Beranda.
@@ -194,6 +195,22 @@ export interface StokRegulator {
   sedangDisewa: number;
 }
 
+/**
+ * Berapa tabung per kode di balik satu angka ubin, mis. 11 Kosong = 8 M + 1 R + 2 C2H2.
+ *
+ * Dikelompokkan dari prefiks kode, bukan gasType, dengan alasan yang sama seperti
+ * urutan di urutanTabung.ts: kolom gasType tidak bisa dipercaya di data ini, sementara
+ * kodenya rapi. Lagipula seluruh oksigen bernilai 'Oxygen' yang sama, jadi
+ * mengelompokkannya per gasType justru melebur M, YK, R, SL, dan R2 jadi satu angka --
+ * padahal justru itu yang ingin dibedakan saat melihat stok.
+ */
+export interface RincianKodeTabung {
+  prefiks: string;
+  qty: number;
+}
+
+type KunciUbinStok = 'siapSewa' | 'kosongPerluIsi' | 'diVendor' | 'dalamPengiriman';
+
 export interface KesiapanStok {
   siapSewa: number;
   kosongPerluIsi: number;
@@ -201,7 +218,15 @@ export interface KesiapanStok {
   dalamPengiriman: number;
   curah: StokCurah[];
   regulator: StokRegulator[];
+  rincian: Record<KunciUbinStok, RincianKodeTabung[]>;
 }
+
+const KUNCI_PER_STATUS: Partial<Record<CylinderStatus, KunciUbinStok>> = {
+  [CylinderStatus.Available]: 'siapSewa',
+  [CylinderStatus.EmptyRefill]: 'kosongPerluIsi',
+  [CylinderStatus.Refilling]: 'diVendor',
+  [CylinderStatus.Delivery]: 'dalamPengiriman',
+};
 
 /**
  * Apa yang bisa dilayani kalau ada pelanggan datang sekarang.
@@ -220,12 +245,36 @@ export function hitungKesiapanStok(
   let diVendor = 0;
   let dalamPengiriman = 0;
 
+  const perKode: Record<KunciUbinStok, Map<string, number>> = {
+    siapSewa: new Map(),
+    kosongPerluIsi: new Map(),
+    diVendor: new Map(),
+    dalamPengiriman: new Map(),
+  };
+
   for (const c of cylinders) {
-    if (c.status === CylinderStatus.Available) siapSewa++;
-    else if (c.status === CylinderStatus.EmptyRefill) kosongPerluIsi++;
-    else if (c.status === CylinderStatus.Refilling) diVendor++;
-    else if (c.status === CylinderStatus.Delivery) dalamPengiriman++;
+    const kunci = KUNCI_PER_STATUS[c.status];
+    if (!kunci) continue;
+
+    if (kunci === 'siapSewa') siapSewa++;
+    else if (kunci === 'kosongPerluIsi') kosongPerluIsi++;
+    else if (kunci === 'diVendor') diVendor++;
+    else if (kunci === 'dalamPengiriman') dalamPengiriman++;
+
+    const peta = perKode[kunci];
+    const prefiks = prefiksTabung(c.serialCode);
+    peta.set(prefiks, (peta.get(prefiks) || 0) + 1);
   }
+
+  // Diurut mengikuti urutan baku yang sama dengan daftar tabung, bukan dari yang
+  // terbanyak: kalau tiap ubin mengurut sendiri menurut qty-nya, kode yang sama
+  // berpindah-pindah posisi antar ubin dan mata harus mencarinya lagi tiap kali.
+  const keRincian = (peta: Map<string, number>): RincianKodeTabung[] =>
+    Array.from(peta, ([prefiks, qty]) => ({ prefiks, qty })).sort(
+      (a, b) =>
+        peringkatPrefiks(a.prefiks) - peringkatPrefiks(b.prefiks) ||
+        a.prefiks.localeCompare(b.prefiks)
+    );
 
   const curah = tarifCurahAktif(tariffs)
     .map(t => ({ size: t.size as CylinderSize, gasType: t.gasType, qty: t.stockQty || 0 }))
@@ -243,7 +292,20 @@ export function hitungKesiapanStok(
       };
     });
 
-  return { siapSewa, kosongPerluIsi, diVendor, dalamPengiriman, curah, regulator };
+  return {
+    siapSewa,
+    kosongPerluIsi,
+    diVendor,
+    dalamPengiriman,
+    curah,
+    regulator,
+    rincian: {
+      siapSewa: keRincian(perKode.siapSewa),
+      kosongPerluIsi: keRincian(perKode.kosongPerluIsi),
+      diVendor: keRincian(perKode.diVendor),
+      dalamPengiriman: keRincian(perKode.dalamPengiriman),
+    },
+  };
 }
 
 // -------------------------------------------------------------- Tabung di pelanggan

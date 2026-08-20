@@ -29,7 +29,7 @@ export function prefiksTabung(serialCode: string): string {
 }
 
 /** Posisi prefiks pada urutan baku; yang tidak terdaftar dapat nomor paling akhir. */
-function peringkatPrefiks(prefiks: string): number {
+export function peringkatPrefiks(prefiks: string): number {
   const posisi = URUTAN_PREFIKS.indexOf(prefiks);
   return posisi === -1 ? URUTAN_PREFIKS.length : posisi;
 }
