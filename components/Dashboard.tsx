@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Cylinder, Transaction, Member, GasOrder, RefillStation, RentalTariff, CylinderStatus } from '../types';
 import { AMBANG_PESANAN_LAMA, RingkasanAntrian, daftarAntrian } from '../lib/antrianIsi';
 import { LaporanHarian, hariIni, hitungLaporanHarian } from '../lib/laporanHarian';
@@ -35,8 +35,11 @@ const Dashboard: React.FC<DashboardProps> = ({ cylinders, transactions, members,
     () => hitungKesiapanStok(cylinders, transactions, tariffs),
     [cylinders, transactions, tariffs]);
 
+  // batasBaris dinaikkan dari default 5: tabel di Beranda sekarang bisa expand
+  // sampai 20 baris tanpa perlu pindah halaman, cukup untuk kebanyakan kasus
+  // sebelum benar-benar butuh Stok Tabung penuh.
   const sewa = useMemo(
-    () => hitungSewaTerlama(cylinders, transactions, members),
+    () => hitungSewaTerlama(cylinders, transactions, members, undefined, 20),
     [cylinders, transactions, members]);
 
   const bon = useMemo(() => hitungBon(members), [members]);
@@ -217,70 +220,93 @@ const KesiapanStokBlok: React.FC<{ stok: KesiapanStok; onBuka: (status: Cylinder
 
 // -------------------------------------------------------------- Tabung di pelanggan
 
-const TabungDiPelanggan: React.FC<{ sewa: RingkasanSewa; onBuka: () => void }> = ({ sewa, onBuka }) => (
-  <div className={`${KARTU} overflow-hidden`}>
-    <div className="p-6 border-b border-gray-100 flex items-start justify-between gap-4">
-      <div>
-        <h2 className="font-bold text-gray-800">Tabung di Tangan Pelanggan</h2>
-        <p className="text-sm text-gray-500 mt-0.5">{sewa.totalDisewa} tabung sedang disewa</p>
+/** Baris yang tampil sebelum "Lihat Semua" diklik. */
+const BATAS_BARIS_SEWA = 5;
+
+const TabungDiPelanggan: React.FC<{ sewa: RingkasanSewa; onBuka: () => void }> = ({ sewa, onBuka }) => {
+  const [expanded, setExpanded] = useState(false);
+  const adaLebihBanyak = sewa.terlama.length > BATAS_BARIS_SEWA;
+  const baris = expanded ? sewa.terlama : sewa.terlama.slice(0, BATAS_BARIS_SEWA);
+
+  return (
+    <div className={`${KARTU} overflow-hidden`}>
+      <div className="p-6 border-b border-gray-100 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="font-bold text-gray-800">Tabung di Tangan Pelanggan</h2>
+          <p className="text-sm text-gray-500 mt-0.5">{sewa.totalDisewa} tabung sedang disewa</p>
+        </div>
+        {sewa.lewatAmbang > 0 && (
+          <span className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg bg-red-50 text-red-700 border border-red-100">
+            {sewa.lewatAmbang} lebih dari {sewa.ambangHari} hari
+          </span>
+        )}
       </div>
-      {sewa.lewatAmbang > 0 && (
-        <span className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg bg-red-50 text-red-700 border border-red-100">
-          {sewa.lewatAmbang} lebih dari {sewa.ambangHari} hari
-        </span>
+
+      {sewa.terlama.length > 0 ? (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-gray-50 text-gray-500">
+                <tr>
+                  <th className="px-6 py-2 font-medium">Tabung</th>
+                  <th className="px-6 py-2 font-medium">Pelanggan</th>
+                  <th className="px-6 py-2 font-medium">Tanggal Sewa</th>
+                  <th className="px-6 py-2 font-medium text-right">Durasi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {baris.map(b => (
+                  <tr key={b.cylinderId} className="hover:bg-gray-50">
+                    <td className="px-6 py-3">
+                      <p className="font-mono font-bold text-gray-700">{b.serialCode}</p>
+                      <p className="text-[10px] text-gray-400">{b.gasType}</p>
+                    </td>
+                    <td className="px-6 py-3 text-gray-700">{b.namaPelanggan}</td>
+                    <td className="px-6 py-3 text-gray-500">{formatTanggal(b.tanggalSewa)}</td>
+                    <td className="px-6 py-3 text-right">
+                      <span
+                        className={`text-[10px] font-bold px-2 py-1 rounded-full ${
+                          b.hari > sewa.ambangHari ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'
+                        }`}
+                      >
+                        {b.hari} hari
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex border-t border-gray-100">
+            {adaLebihBanyak && (
+              <button
+                onClick={() => setExpanded(v => !v)}
+                className="flex-1 px-6 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50 flex items-center justify-center gap-1"
+              >
+                {expanded ? 'Tampilkan Lebih Sedikit' : `Lihat ${sewa.terlama.length - BATAS_BARIS_SEWA} Lainnya`}
+                <span className="material-icons text-base">{expanded ? 'expand_less' : 'expand_more'}</span>
+              </button>
+            )}
+            <button
+              onClick={onBuka}
+              className={`flex-1 px-6 py-3 text-sm font-medium text-indigo-600 hover:bg-indigo-50 ${
+                adaLebihBanyak ? 'border-l border-gray-100' : ''
+              }`}
+            >
+              Buka Stok Tabung
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="p-8 text-center">
+          <span className="material-icons text-4xl text-green-500 mb-2 block">check_circle</span>
+          <p className="text-sm text-gray-500">Tidak ada tabung yang sedang disewa.</p>
+        </div>
       )}
     </div>
-
-    {sewa.terlama.length > 0 ? (
-      <>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-gray-50 text-gray-500">
-              <tr>
-                <th className="px-6 py-2 font-medium">Tabung</th>
-                <th className="px-6 py-2 font-medium">Pelanggan</th>
-                <th className="px-6 py-2 font-medium">Tanggal Sewa</th>
-                <th className="px-6 py-2 font-medium text-right">Durasi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {sewa.terlama.map(b => (
-                <tr key={b.cylinderId} className="hover:bg-gray-50">
-                  <td className="px-6 py-3">
-                    <p className="font-mono font-bold text-gray-700">{b.serialCode}</p>
-                    <p className="text-[10px] text-gray-400">{b.gasType}</p>
-                  </td>
-                  <td className="px-6 py-3 text-gray-700">{b.namaPelanggan}</td>
-                  <td className="px-6 py-3 text-gray-500">{formatTanggal(b.tanggalSewa)}</td>
-                  <td className="px-6 py-3 text-right">
-                    <span
-                      className={`text-[10px] font-bold px-2 py-1 rounded-full ${
-                        b.hari > sewa.ambangHari ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'
-                      }`}
-                    >
-                      {b.hari} hari
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <button
-          onClick={onBuka}
-          className="w-full px-6 py-3 text-sm font-medium text-indigo-600 hover:bg-indigo-50 border-t border-gray-100"
-        >
-          Buka Stok Tabung
-        </button>
-      </>
-    ) : (
-      <div className="p-8 text-center">
-        <span className="material-icons text-4xl text-green-500 mb-2 block">check_circle</span>
-        <p className="text-sm text-gray-500">Tidak ada tabung yang sedang disewa.</p>
-      </div>
-    )}
-  </div>
-);
+  );
+};
 
 // ----------------------------------------------------------------------- Aksi cepat
 
