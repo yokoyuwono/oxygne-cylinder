@@ -25,8 +25,18 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
  * dengan layar konfigurasi, bukan dengan aplikasinya. Di dev sebaliknya: env
  * yang kosong berarti `npm run dev` sedang menulis ke data toko yang asli, dan
  * itu justru yang harus ditahan.
+ *
+ * "Terisi" bukan sekadar "ada". `.env.example` disalin apa adanya adalah jalur
+ * yang paling sering ditempuh, dan nilai contohnya lolos dari pemeriksaan
+ * keberadaan -- lalu gagalnya muncul jauh dari sebabnya: layar login yang
+ * menolak tanpa alasan, karena host tujuannya memang tidak pernah ada.
  */
-export const perluSetupEnv = import.meta.env.DEV && !(envUrl && envKey);
+const masihNilaiContoh = (v: string) => /x{8,}/i.test(v) || v.endsWith('...');
+
+const envTerisi = !!envUrl && !!envKey
+  && !masihNilaiContoh(envUrl) && !masihNilaiContoh(envKey);
+
+export const perluSetupEnv = import.meta.env.DEV && !envTerisi;
 
 /**
  * Helper to fetch ALL records from a table, bypassing the default 1000 row limit

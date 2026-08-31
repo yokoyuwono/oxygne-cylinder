@@ -16,8 +16,10 @@ const LayarSetupEnv: React.FC = () => (
       </div>
       <h1 className="text-2xl font-bold text-gray-800 mb-2">Konfigurasi Diperlukan</h1>
       <p className="text-gray-500 mb-6">
-        Dev server dijalankan tanpa kredensial Supabase. Tanpa keduanya, aplikasi
-        akan tersambung ke <strong className="text-red-600">database toko yang asli</strong>.
+        Dev server berjalan tanpa kredensial Supabase yang terisi — belum ada, atau
+        masih berupa nilai contoh dari <span className="font-mono text-xs bg-gray-100 px-1 rounded">.env.example</span>.
+        Tanpa keduanya, aplikasi akan tersambung ke{' '}
+        <strong className="text-red-600">database toko yang asli</strong>.
       </p>
 
       <div className="bg-slate-900 rounded-lg p-4 text-left overflow-x-auto mb-6">
