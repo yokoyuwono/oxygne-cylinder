@@ -24,7 +24,7 @@ import { bolehKelolaPengguna } from './lib/peran';
 import KasView, { KasPayload } from './components/KasView';
 import { PengeluaranPayload } from './lib/pengeluaran';
 import BonView, { BayarBonPayload, TambahBonPayload } from './components/BonView';
-import { supabase, isSupabaseConfigured, fetchAllRecords } from './lib/supabase';
+import { supabase, fetchAllRecords } from './lib/supabase';
 
 /**
  * Baris tabel profiles apa adanya.
@@ -81,33 +81,6 @@ const barisBayarPesanan = (
 });
 
 const App: React.FC = () => {
-  // -- Configuration Guard --
-  if (!isSupabaseConfigured) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4 font-sans">
-        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-lg border border-gray-100 text-center animate-fade-in-up">
-          <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
-            <span className="material-icons text-3xl">settings_alert</span>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">Konfigurasi Diperlukan</h1>
-          <p className="text-gray-500 mb-6">
-            Aplikasi tidak bisa terhubung ke Supabase. Atur variabel lingkungan terlebih dahulu untuk melanjutkan.
-          </p>
-
-          <div className="bg-slate-900 rounded-lg p-4 text-left overflow-x-auto mb-6">
-            <p className="text-slate-400 text-xs uppercase font-bold mb-2">.env / Variabel Lingkungan</p>
-            <code className="text-green-400 text-sm font-mono block mb-1">VITE_SUPABASE_URL=your_project_url</code>
-            <code className="text-green-400 text-sm font-mono block">VITE_SUPABASE_ANON_KEY=your_anon_key</code>
-          </div>
-
-          <p className="text-sm text-gray-400">
-            Kalau menjalankan secara lokal, buat berkas <span className="font-mono bg-gray-100 px-1 rounded">.env</span> di folder utama proyek.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   // -- Auth State --
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);

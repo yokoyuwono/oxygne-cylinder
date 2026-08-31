@@ -11,9 +11,22 @@ const supabaseKey = envKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJz
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Helper to check if we are running with real credentials. 
-// We check if the keys are present (either from env or hardcoded) and valid.
-export const isSupabaseConfigured = !!supabaseUrl && !!supabaseKey && supabaseUrl !== 'https://placeholder.supabase.co';
+/**
+ * Benar ketika aplikasi harus berhenti dan meminta env diisi lebih dulu.
+ *
+ * Pemeriksaan lamanya menanyakan `supabaseUrl` -- nilai SESUDAH jatuh ke bawaan
+ * produksi di atas. Nilai itu tidak pernah kosong, jadi jawabannya selalu "sudah
+ * terkonfigurasi" dan layar penjaganya tidak pernah sekali pun muncul. Yang
+ * menentukan justru `envUrl`/`envKey`: ada tidaknya kredensial yang benar-benar
+ * dipasok lingkungan.
+ *
+ * Hanya berlaku saat dev. Aplikasi toko dibangun tanpa env dan memang hidup dari
+ * nilai bawaan di atas -- menahannya di produksi berarti menyambut operator
+ * dengan layar konfigurasi, bukan dengan aplikasinya. Di dev sebaliknya: env
+ * yang kosong berarti `npm run dev` sedang menulis ke data toko yang asli, dan
+ * itu justru yang harus ditahan.
+ */
+export const perluSetupEnv = import.meta.env.DEV && !(envUrl && envKey);
 
 /**
  * Helper to fetch ALL records from a table, bypassing the default 1000 row limit
