@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Rahasia -- JANGAN pernah ter-commit.
+# Pola lama `*.local` hanya menangkap .env.local; `.env` biasa lolos.
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -22,3 +28,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Perkakas agen
+.claude/settings.local.json
+.claude/worktrees/
+.hermes/
+
+# Supabase CLI
+supabase/.temp/
+supabase/.branches/
