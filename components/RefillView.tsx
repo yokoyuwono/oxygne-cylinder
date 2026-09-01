@@ -2,6 +2,7 @@
 import { Cylinder, CylinderStatus, RefillStation, GasType, RefillPrice, RefillDraft, PenukaranTabung, CylinderSize, Transaction } from '../types';
 import { labelStatusTabung } from '../labels';
 import { urutkanTabung } from '../lib/urutanTabung';
+import { hargaVendorTabung, perkiraanBiayaTerima, periksaBiayaTerima, rincianBiayaTerima } from '../lib/isiUlang';
 import RefillHistory from './RefillHistory';
 
 interface RefillViewProps {
@@ -101,31 +102,24 @@ const RefillView: React.FC<RefillViewProps> = ({
     /** Tabung yang benar-benar masuk gudang: yang pulang sendiri ditambah penggantinya. */
     const totalDiterima = selectedIds.length + penukaran.length;
 
+    /**
+     * Berapa seharusnya batch ini dibayar menurut daftar harga vendor, dan seberapa jauh
+     * nominal yang diketik menyimpang darinya. Angka ini cuma penuntun -- lihat
+     * lib/isiUlang.ts untuk alasan kenapa selisih diperingatkan, bukan ditolak.
+     */
+    const perkiraanTerima = useMemo(
+        () => perkiraanBiayaTerima(selectedIds, penukaran, cylinders, transactions, refillPrices),
+        [selectedIds, penukaran, cylinders, transactions, refillPrices]);
+
+    const biayaDiketik = parseFloat(restockCost) || 0;
+    const pemeriksaanBiaya = periksaBiayaTerima(biayaDiketik, totalDiterima, perkiraanTerima);
+    const rincianBiaya = rincianBiayaTerima(biayaDiketik, totalDiterima, perkiraanTerima);
+
     // -- Dispatch Logic --
     // 1. Get prices for selected vendor
     const vendorPrices = useMemo(() =>
         refillPrices.filter(p => p.stationId === selectedStationId),
         [refillPrices, selectedStationId]);
-
-    // Helper to find the best price match for a cylinder at current vendor
-    const getBestPriceMatch = (cyl: Cylinder, prices: RefillPrice[]) => {
-        const matches = prices.filter(p =>
-            p.gasType === cyl.gasType &&
-            p.size === cyl.size &&
-            (!p.serialCode || cyl.serialCode.toUpperCase().includes(p.serialCode.toUpperCase()))
-        );
-
-        if (matches.length === 0) return null;
-
-        // Sort: items with serialCode first, then by serialCode length (descending)
-        return [...matches].sort((a, b) => {
-            const aSku = a.serialCode || "";
-            const bSku = b.serialCode || "";
-            if (aSku && !bSku) return -1;
-            if (!aSku && bSku) return 1;
-            return bSku.length - aSku.length; // Priority to longer SKU (more specific)
-        })[0];
-    };
 
     // 2. Filter cylinders that this vendor can actually accept (based on defined prices)
     //
@@ -133,13 +127,13 @@ const RefillView: React.FC<RefillViewProps> = ({
     // vendor yang BARU saja dipilih -- saat memuat draf, state-nya belum sempat berubah.
     const tabungCocokUntuk = (stationId: string) => {
         const hargaVendor = refillPrices.filter(p => p.stationId === stationId);
-        return emptyCylinders.filter(c => !!getBestPriceMatch(c, hargaVendor));
+        return emptyCylinders.filter(c => !!hargaVendorTabung(c, hargaVendor));
     };
 
     const vendorCompatibleCylinders = useMemo(() => {
         if (!selectedStationId) return [];
 
-        return emptyCylinders.filter(c => !!getBestPriceMatch(c, vendorPrices));
+        return emptyCylinders.filter(c => !!hargaVendorTabung(c, vendorPrices));
     }, [emptyCylinders, vendorPrices, selectedStationId]);
 
     // 3. Saring lagi dengan kata kunci petugas (kode seri, jenis gas, ukuran, lokasi)
@@ -273,7 +267,7 @@ const RefillView: React.FC<RefillViewProps> = ({
             if (!cyl) return;
 
             // Find the specific price that matched this cylinder
-            const priceEntry = getBestPriceMatch(cyl, vendorPrices);
+            const priceEntry = hargaVendorTabung(cyl, vendorPrices);
 
             const key = `${cyl.gasType}-${cyl.size}-${priceEntry?.serialCode || 'GENERIC'}`;
 
@@ -570,6 +564,87 @@ const RefillView: React.FC<RefillViewProps> = ({
         );
     };
 
+    /**
+     * Perkiraan biaya batch beserta peringatannya, dipakai di tiga tempat sekaligus:
+     * panel kanan desktop, bilah bawah ponsel, dan modal konfirmasi. Satu bentuk supaya
+     * petugas membaca angka yang sama di mana pun ia berhenti, dan supaya kalimat
+     * peringatannya tidak perlu ditulis ulang tiga kali.
+     */
+    const panelPerkiraanBiaya = (ringkas: boolean = false) => {
+        const { status, perkiraan, perUnit, selisih, rasio } = pemeriksaanBiaya;
+        const persen = Math.round(rasio * 100);
+        const kurang = selisih < 0;
+
+        const gaya = {
+            kosong: 'bg-amber-50 border-amber-200 text-amber-800',
+            meleset: 'bg-red-50 border-red-200 text-red-800',
+            'tanpa-acuan': 'bg-gray-50 border-gray-200 text-gray-600',
+            wajar: 'bg-green-50 border-green-100 text-green-800',
+        }[status];
+
+        const ikon = { kosong: 'warning', meleset: 'error_outline', 'tanpa-acuan': 'help_outline', wajar: 'check_circle' }[status];
+
+        return (
+            <div className="space-y-2">
+                {perkiraan.jumlahBerharga > 0 && (
+                    <div className="flex justify-between items-baseline text-sm">
+                        <span className="text-gray-500">Perkiraan Biaya</span>
+                        <span className="font-bold text-indigo-600">{formatIDR(perkiraan.total)}</span>
+                    </div>
+                )}
+
+                {/* Perkiraan yang belum mencakup semua tabung selalu lebih kecil dari
+                    tagihan sebenarnya. Petugas harus tahu itu sebelum memakainya sebagai
+                    pembanding, kalau tidak angka yang kurang terbaca seperti angka pas. */}
+                {perkiraan.jumlahTanpaHarga > 0 && perkiraan.jumlahBerharga > 0 && (
+                    <p className="text-[11px] text-gray-400 leading-snug">
+                        Baru mencakup {perkiraan.jumlahBerharga} dari {totalDiterima} tabung — sisanya belum punya harga vendor.
+                    </p>
+                )}
+
+                {biayaDiketik > 0 && totalDiterima > 0 && (
+                    <div className="flex justify-between items-baseline text-xs text-gray-500">
+                        <span>Yang diketik</span>
+                        <span className="font-medium text-gray-700">≈ {formatIDR(perUnit)} / tabung</span>
+                    </div>
+                )}
+
+                <div className={`rounded-lg border p-2.5 flex gap-2 text-xs leading-relaxed ${gaya}`}>
+                    <span className="material-icons text-sm shrink-0">{ikon}</span>
+                    <span>
+                        {status === 'kosong' && (
+                            <>Total biaya belum diisi. Batch ini akan tercatat <strong>Rp 0</strong> dan tidak muncul di Pengeluaran.</>
+                        )}
+                        {status === 'meleset' && (
+                            <>
+                                <strong>{kurang ? 'Kurang' : 'Lebih'} {formatIDR(Math.abs(selisih))} ({persen}%)</strong> dari
+                                perkiraan {formatIDR(perkiraan.total)}.
+                                {!ringkas && kurang && ' Kolom ini minta TOTAL satu batch, bukan harga per tabung.'}
+                            </>
+                        )}
+                        {status === 'tanpa-acuan' && (
+                            <>Belum ada harga vendor untuk tabung ini, jadi tidak ada pembanding. Periksa nota pabrik.</>
+                        )}
+                        {status === 'wajar' && <>Sesuai perkiraan daftar harga vendor.</>}
+                    </span>
+                </div>
+
+                {/* Apa yang akan benar-benar tersimpan. Selisihnya tidak diratakan ke tiap
+                    tabung -- ia bukan biaya tabung tertentu, jadi berdiri sendiri sebagai
+                    satu baris. Petugas berhak tahu itu sebelum menekan konfirmasi. */}
+                {rincianBiaya.penyeimbang && (
+                    <p className="text-[11px] text-gray-500 leading-snug">
+                        Tiap tabung dicatat sesuai harga vendornya. Selisih{' '}
+                        <strong>{formatIDR(rincianBiaya.penyeimbang.nominal)}</strong> jadi 1 baris{' '}
+                        {rincianBiaya.penyeimbang.jenis === 'kurang-bayar'
+                            ? 'pengeluaran tambahan ke pabrik'
+                            : 'uang kembali dari pabrik'}.
+                    </p>
+                )}
+            </div>
+        );
+    };
+
     return (
         <div className="space-y-6 relative animate-fade-in-up pb-32 lg:pb-0">
             {feedback && (
@@ -732,7 +807,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                                     </thead>
                                                     <tbody className="divide-y divide-gray-50">
                                                         {tabungTampil.map(c => {
-                                                            const priceConfig = getBestPriceMatch(c, vendorPrices);
+                                                            const priceConfig = hargaVendorTabung(c, vendorPrices);
                                                             const displaySku = priceConfig?.serialCode || c.serialCode.split('-')[0];
 
                                                             return (
@@ -770,7 +845,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                             {/* Mobile Card List */}
                                             <div className="lg:hidden p-4 bg-gray-50 space-y-3">
                                                 {tabungTampil.map(c => {
-                                                    const priceConfig = getBestPriceMatch(c, vendorPrices);
+                                                    const priceConfig = hargaVendorTabung(c, vendorPrices);
                                                     const displaySku = priceConfig?.serialCode || c.serialCode.split('-')[0];
                                                     return renderCylinderCard(c, selectedIds.includes(c.id), displaySku, priceConfig?.price);
                                                 })}
@@ -1053,6 +1128,8 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     />
                                 </div>
 
+                                {totalDiterima > 0 && panelPerkiraanBiaya()}
+
                                 <div className="bg-green-50 rounded-lg p-4 border border-green-100 space-y-1">
                                     <div className="flex justify-between text-sm">
                                         <span className="text-green-800">Penerimaan</span>
@@ -1097,6 +1174,9 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     {totalDiterima}
                                 </div>
                             </div>
+
+                            {totalDiterima > 0 && panelPerkiraanBiaya(true)}
+
                             <button
                                 onClick={handleRestockClick}
                                 disabled={totalDiterima === 0}
@@ -1355,10 +1435,17 @@ const RefillView: React.FC<RefillViewProps> = ({
                         <div className="p-6">
                             <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 mb-6 text-center">
                                 <p className="text-gray-500 text-sm mb-1">Total Biaya Dikeluarkan</p>
-                                <p className="text-3xl font-bold text-gray-800 tracking-tight">{formatIDR(parseFloat(restockCost) || 0)}</p>
-                                {totalDiterima > 0 && parseFloat(restockCost) > 0 && (
-                                    <p className="text-xs text-gray-400 mt-1">Avg: {formatIDR((parseFloat(restockCost) || 0) / totalDiterima)} / cyl</p>
+                                <p className="text-3xl font-bold text-gray-800 tracking-tight">{formatIDR(biayaDiketik)}</p>
+                                {totalDiterima > 0 && biayaDiketik > 0 && (
+                                    <p className="text-xs text-gray-400 mt-1">{formatIDR(pemeriksaanBiaya.perUnit)} / tabung</p>
                                 )}
+                            </div>
+
+                            {/* Gerbang terakhir sebelum nominalnya jadi baris pengeluaran. Sengaja
+                                diulang di sini: petugas yang mengetik di bilah bawah ponsel tidak
+                                pernah melihat panel kanan sama sekali. */}
+                            <div className="mb-6">
+                                {panelPerkiraanBiaya()}
                             </div>
 
                             {penukaran.length > 0 && (
