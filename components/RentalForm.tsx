@@ -7,6 +7,7 @@ import PilihMetodeBayar from './PilihMetodeBayar';
 import { hitungHoldingCurah, hitungHoldingRegulator, totalRegulatorBeredar } from '../lib/bulkStock';
 import { tarifRegulatorAktif } from '../lib/regulator';
 import { cariDiKolom } from '../lib/cari';
+import { hariIni } from '../lib/laporanHarian';
 
 interface RentalFormProps {
     cylinders: Cylinder[];
@@ -17,7 +18,7 @@ interface RentalFormProps {
     tariffs: RentalTariff[];
     // metodeBayar sengaja di ujung: tanda tangan ini sudah panjang, dan menambah di
     // belakang tidak menggeser satu pun argumen yang sudah ada.
-    onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean, returnRegulatorQty?: number, returnBulkQty?: Record<string, number>, metodeBayar?: MetodeBayar, regulatorKeluar?: { sewa: number; jual: number }) => void;
+    onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean, returnRegulatorQty?: number, returnBulkQty?: Record<string, number>, metodeBayar?: MetodeBayar, regulatorKeluar?: { sewa: number; jual: number }, tanggal?: string) => void;
     onNewRental: (payload: NewRentalPayload) => Promise<void>;
 }
 
@@ -41,6 +42,10 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [feedback, setFeedback] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
     const [transactionSource, setTransactionSource] = useState<'TOKO' | 'DELIVERY'>('TOKO');
+    // Tanggal transaksi. Bawaannya hari ini, bisa dimundurkan untuk mencatat sewa
+    // atau pengembalian yang terlewat dicatat pada harinya. Satu tanggal untuk Toko
+    // maupun Pengiriman -- keduanya memakai layar kasir yang sama.
+    const [tanggal, setTanggal] = useState(hariIni);
     const [metodeBayar, setMetodeBayar] = useState<MetodeBayar>('CASH');
 
     // -- Mobile View State --
@@ -359,7 +364,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
         onCompleteRental(
             selectedMemberId, cart.map(c => c.id), returnsList, totalCost, isUnpaid,
             returnRegulatorQty, returnBulk, isUnpaid ? undefined : metodeBayar,
-            { sewa: regSewaQty, jual: regJualQty }
+            { sewa: regSewaQty, jual: regJualQty }, tanggal
         );
 
         // Reset
@@ -375,6 +380,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
         setDebouncedMemberQuery('');
         setError(null);
         setMetodeBayar('CASH');
+        setTanggal(hariIni());
         setIsConfirmOpen(false);
         showFeedback(isUnpaid
             ? `Sewa tercatat. ${formatIDR(totalCost + totalRegulator)} ditambahkan ke bon.`
@@ -389,6 +395,8 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
     // angka itu rata ke tiap baris tabung, dan menyelipkan nominal regulator ke sana
     // akan menempelkan harga regulator pada tabung yang tidak ada hubungannya.
     const totalTagihan = totalCost + totalRegulator;
+
+    const tanggalMundur = tanggal !== hariIni();
 
     useEffect(() => setHighlightedMemberIdx(0), [debouncedMemberQuery]);
     useEffect(() => setHighlightedCylinderIdx(0), [scanInput]);
@@ -605,24 +613,45 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                         </div>
                     </div>
                 </div>
-                <button
-                    onClick={() => {
-                        setSelectedMemberId('');
-                        setSelectedMemberObj(null);
-                        setMemberQuery('');
-                        setDebouncedMemberQuery('');
-                        setCart([]);
-                        setReturnsList([]);
-                        setReturnRegulatorQty(0);
-                        setRegSewaQty(0);
-                        setRegJualQty(0);
-                        setReturnBulk({});
-                    }}
-                    className="px-3 py-1.5 md:px-4 md:py-2 text-xs md:text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors whitespace-nowrap"
-                >
-                    Change
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                    {/* Tanggal transaksi. max hari ini: catatan susulan boleh mundur,
+                        tapi transaksi yang belum terjadi tidak boleh dicatat. */}
+                    <input
+                        type="date"
+                        value={tanggal}
+                        max={hariIni()}
+                        onChange={(e) => setTanggal(e.target.value || hariIni())}
+                        title="Tanggal transaksi"
+                        className={`border rounded-lg px-2 py-1.5 md:px-3 md:py-2 text-xs md:text-sm font-medium outline-none transition-colors focus:border-indigo-500 ${tanggalMundur ? 'border-amber-400 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-700'}`}
+                    />
+                    <button
+                        onClick={() => {
+                            setSelectedMemberId('');
+                            setSelectedMemberObj(null);
+                            setMemberQuery('');
+                            setDebouncedMemberQuery('');
+                            setCart([]);
+                            setReturnsList([]);
+                            setReturnRegulatorQty(0);
+                            setRegSewaQty(0);
+                            setRegJualQty(0);
+                            setReturnBulk({});
+                        }}
+                        className="px-3 py-1.5 md:px-4 md:py-2 text-xs md:text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors whitespace-nowrap"
+                    >
+                        Change
+                    </button>
+                </div>
             </div>
+
+            {/* Peringatan tanggal mundur: tanpa ini petugas mudah lupa pemilih tanggal
+                masih tertinggal di hari kemarin dan transaksi hari ini ikut tercatat mundur. */}
+            {tanggalMundur && (
+                <div className="flex items-center gap-2 bg-amber-50 border border-amber-300 text-amber-800 px-3 py-2 rounded-lg text-xs md:text-sm mb-4 shrink-0">
+                    <span className="material-icons text-base">history</span>
+                    <span>Transaksi dicatat mundur ke <strong>{new Date(tanggal).toLocaleDateString('id-ID', { dateStyle: 'long' })}</strong>, bukan hari ini.</span>
+                </div>
+            )}
 
             <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0">
 
@@ -911,7 +940,7 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                 <div className="hidden lg:flex w-[400px] bg-white rounded-xl shadow-lg border border-gray-200 flex-col shrink-0 overflow-hidden h-full">
                     <div className="p-5 border-b border-dashed border-gray-300 bg-gray-50">
                         <h2 className="text-lg font-bold text-gray-900 tracking-tight">Struk Transaksi</h2>
-                        <p className="text-xs text-gray-500 mt-1">{new Date().toLocaleString('id-ID')}</p>
+                        <p className="text-xs text-gray-500 mt-1">{new Date(tanggal).toLocaleDateString('id-ID', { dateStyle: 'long' })}</p>
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -1057,6 +1086,12 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                                 <p className="text-gray-400 text-xs uppercase tracking-widest font-bold mb-1">Pelanggan</p>
                                 <h4 className="text-xl font-bold text-gray-800">{selectedMember.companyName}</h4>
                                 <p className="text-sm text-gray-500">{selectedMember.name}</p>
+                                {/* Tanggalnya ditegaskan di sini karena inilah layar terakhir sebelum
+                                    barisnya tersimpan -- salah tanggal paling murah dibatalkan di sini. */}
+                                <p className={`text-sm mt-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded ${tanggalMundur ? 'bg-amber-50 text-amber-800 font-bold' : 'text-gray-500'}`}>
+                                    <span className="material-icons text-sm">event</span>
+                                    {new Date(tanggal).toLocaleDateString('id-ID', { dateStyle: 'long' })}
+                                </p>
                             </div>
 
                             <div className="space-y-4 max-h-[40vh] overflow-y-auto mb-6">

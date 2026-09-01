@@ -40,6 +40,9 @@ export const KATEGORI_PENGELUARAN: KategoriPengeluaran[] = [
  */
 const POS_LAINNYA = KATEGORI_PENGELUARAN[KATEGORI_PENGELUARAN.length - 1];
 
+/** Dipakai juga di App.tsx untuk menandai baris kekurangan bayar ke pabrik. */
+export const POS_ISI_ULANG_ID = 'ISI_ULANG_GAS';
+
 /**
  * Pos bawaan untuk biaya isi ulang ke pabrik.
  *
@@ -49,7 +52,7 @@ const POS_LAINNYA = KATEGORI_PENGELUARAN[KATEGORI_PENGELUARAN.length - 1];
  * pernah cocok dengan totalnya.
  */
 const POS_ISI_ULANG: KategoriPengeluaran = {
-  id: 'ISI_ULANG_GAS',
+  id: POS_ISI_ULANG_ID,
   label: 'Isi Ulang Gas',
   ikon: 'local_gas_station',
 };
@@ -64,9 +67,15 @@ export interface PengeluaranPayload {
 
 const petaKategori = new Map(KATEGORI_PENGELUARAN.map(k => [k.id, k]));
 
-/** Pos sebuah baris pengeluaran; yang kosong maupun tak dikenal jadi "Lain-lain". */
+/**
+ * Pos sebuah baris pengeluaran; yang kosong maupun tak dikenal jadi "Lain-lain".
+ *
+ * Kekurangan bayar ke pabrik datang sebagai EXPENSE tanpa tabung, bukan REFILL_IN --
+ * lihat handleReceiveFromRefill di App.tsx. Posnya dikenali dari category supaya ia
+ * tetap berkumpul dengan biaya isi ulang yang lain, bukan tersasar ke "Lain-lain".
+ */
 export const posTransaksi = (t: Transaction): KategoriPengeluaran =>
-  t.type === 'REFILL_IN'
+  t.type === 'REFILL_IN' || t.category === POS_ISI_ULANG_ID
     ? POS_ISI_ULANG
     : petaKategori.get(t.category ?? '') ?? POS_LAINNYA;
 

@@ -20,9 +20,10 @@ import { NewRentalPayload } from './components/NewRentalForm';
 import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, PenukaranTabung, AppUser, UserRole, MemberStatus, GasPrice, GasOrder, RentalTariff, MetodeBayar } from './types';
 import { JENIS_PESANAN } from './lib/antrianIsi';
 import { tarifRegulatorAktif } from './lib/regulator';
+import { perkiraanBiayaTerima, rincianBiayaTerima } from './lib/isiUlang';
 import { bolehKelolaPengguna } from './lib/peran';
 import KasView, { KasPayload } from './components/KasView';
-import { PengeluaranPayload } from './lib/pengeluaran';
+import { PengeluaranPayload, POS_ISI_ULANG_ID } from './lib/pengeluaran';
 import BonView, { BayarBonPayload, TambahBonPayload } from './components/BonView';
 import { supabase, fetchAllRecords } from './lib/supabase';
 
@@ -582,7 +583,13 @@ const App: React.FC = () => {
     if (jumlahDiterima === 0) return;
 
     const date = new Date().toISOString();
-    const costPerUnit = totalCost / jumlahDiterima;
+
+    // Tiap tabung dicatat sebesar harga vendornya sendiri, dan selisih antara yang
+    // dibayar dengan daftar harga berdiri sebagai satu baris tersendiri. Aturannya ada
+    // di lib/isiUlang.ts -- termasuk dua keadaan yang sengaja kembali ke bagi rata.
+    const perkiraan = perkiraanBiayaTerima(cylinderIds, penukaran, cylinders, transactions, refillPrices);
+    const rincian = rincianBiayaTerima(totalCost, jumlahDiterima, perkiraan);
+    const biayaTabung = (kunci: string) => rincian.perTabung.get(kunci) ?? rincian.bawaan;
 
     // Tabung pengganti yang belum pernah tercatat harus lahir lebih dulu:
     // transactions."cylinderId" menunjuk cylinders.id, jadi baris transaksinya ditolak
@@ -651,7 +658,7 @@ const App: React.FC = () => {
         cylinderId: id,
         type: 'REFILL_IN' as const,
         date: date,
-        cost: costPerUnit
+        cost: biayaTabung(id)
       })),
       ...penukaran.flatMap(p => {
         const baruId = idPengganti.get(p.lamaId);
@@ -663,7 +670,8 @@ const App: React.FC = () => {
             cylinderId: baruId,
             type: 'REFILL_IN' as const,
             date: date,
-            cost: costPerUnit,
+            // Dikunci ke lamaId: perkiraan dihitung sebelum tabung pengganti punya id.
+            cost: biayaTabung(p.lamaId),
             description: `Pengganti tabung ${seri(p.lamaId)}`
           },
           // Tanpa nominal: uangnya sudah tercatat di baris tabung penggantinya, dan
@@ -678,6 +686,40 @@ const App: React.FC = () => {
         ];
       })
     ];
+
+    /**
+     * Selisih terhadap daftar harga vendor, satu baris untuk satu batch.
+     *
+     * Tidak menempel ke tabung mana pun karena memang bukan biaya sebuah tabung: yang
+     * kurang adalah tambahan yang dibayarkan ke pabrik, yang lebih adalah uang yang
+     * kembali. Keduanya tanpa cylinderId, jadi memakai EXPENSE dan INCOME yang memang
+     * bentuknya begitu -- REFILL_IN tanpa tabung akan tampil sebagai "Diterima Kembali"
+     * tanpa kode seri di Laporan Harian.
+     *
+     * Pos ISI_ULANG_GAS menjaga baris kurang bayar tetap terkumpul bersama biaya isi
+     * ulang di rincian pengeluaran, bukan tersasar ke "Lain-lain".
+     */
+    if (rincian.penyeimbang) {
+      const { jenis, nominal } = rincian.penyeimbang;
+      const kurang = jenis === 'kurang-bayar';
+
+      newTransactions.push(kurang
+        ? {
+          id: `t-isi-kurang-${Date.now()}`,
+          type: 'EXPENSE',
+          date,
+          cost: nominal,
+          description: `Kekurangan bayar isi ulang ${jumlahDiterima} tabung`,
+          category: POS_ISI_ULANG_ID,
+        }
+        : {
+          id: `t-isi-lebih-${Date.now()}`,
+          type: 'INCOME',
+          date,
+          cost: nominal,
+          description: 'Kelebihan bayar isi ulang dikembalikan pabrik',
+        });
+    }
 
     await supabase.from('transactions').insert(newTransactions);
 
@@ -1237,12 +1279,18 @@ const App: React.FC = () => {
      * yang masuk. Dijadikan satu objek, bukan dua argumen: tanda tangan ini sudah
      * sembilan parameter, dan sewa dan jual memang selalu diputuskan bersamaan.
      */
-    regulatorKeluar: { sewa: number; jual: number } = { sewa: 0, jual: 0 }
+    regulatorKeluar: { sewa: number; jual: number } = { sewa: 0, jual: 0 },
+    /**
+     * Tanggal transaksi dari form (YYYY-MM-DD), untuk mencatat sewa atau pengembalian
+     * yang terlewat dicatat pada harinya. Kosong berarti sekarang -- jam ikut tersimpan
+     * supaya urutan transaksi hari ini tetap terbaca.
+     */
+    tanggal?: string
   ) => {
     const member = members.find(m => m.id === memberId);
     if (!member) return;
 
-    const date = new Date().toISOString();
+    const date = tanggal ? new Date(tanggal).toISOString() : new Date().toISOString();
     const newTransactions: Transaction[] = [];
 
     // Regulator yang keluar bersama transaksi ini. Nominalnya dihitung lebih dulu
@@ -1406,8 +1454,8 @@ const App: React.FC = () => {
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
 
         if (lastRentTx) {
-          const diffMs = new Date().getTime() - new Date(lastRentTx.date).getTime();
-          duration = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          const diffMs = new Date(date).getTime() - new Date(lastRentTx.date).getTime();
+          duration = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
         }
 
         newTransactions.push({
