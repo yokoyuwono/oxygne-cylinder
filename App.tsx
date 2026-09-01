@@ -1279,12 +1279,18 @@ const App: React.FC = () => {
      * yang masuk. Dijadikan satu objek, bukan dua argumen: tanda tangan ini sudah
      * sembilan parameter, dan sewa dan jual memang selalu diputuskan bersamaan.
      */
-    regulatorKeluar: { sewa: number; jual: number } = { sewa: 0, jual: 0 }
+    regulatorKeluar: { sewa: number; jual: number } = { sewa: 0, jual: 0 },
+    /**
+     * Tanggal transaksi dari form (YYYY-MM-DD), untuk mencatat sewa atau pengembalian
+     * yang terlewat dicatat pada harinya. Kosong berarti sekarang -- jam ikut tersimpan
+     * supaya urutan transaksi hari ini tetap terbaca.
+     */
+    tanggal?: string
   ) => {
     const member = members.find(m => m.id === memberId);
     if (!member) return;
 
-    const date = new Date().toISOString();
+    const date = tanggal ? new Date(tanggal).toISOString() : new Date().toISOString();
     const newTransactions: Transaction[] = [];
 
     // Regulator yang keluar bersama transaksi ini. Nominalnya dihitung lebih dulu
@@ -1448,8 +1454,8 @@ const App: React.FC = () => {
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
 
         if (lastRentTx) {
-          const diffMs = new Date().getTime() - new Date(lastRentTx.date).getTime();
-          duration = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          const diffMs = new Date(date).getTime() - new Date(lastRentTx.date).getTime();
+          duration = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
         }
 
         newTransactions.push({
