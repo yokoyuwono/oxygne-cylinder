@@ -50,10 +50,17 @@ export function hitungHoldingCurah(transactions: Transaction[], memberId: string
  * jumlah. Baris jual (regulatorSalePrice) sengaja dikecualikan -- regulator
  * yang terjual jadi milik pelanggan permanen, tidak pernah "beredar sewaan"
  * dan tidak akan pernah dikembalikan.
+ *
+ * Baris jual dikenali dari regulatorSalePrice-nya, BUKAN dari absennya
+ * regulatorFee. Kedua kolom itu nullable di database: baris jual yang baru
+ * dibuat memang punya regulatorFee undefined, tapi begitu dimuat ulang dari
+ * Supabase nilainya null -- dan null !== undefined, sehingga seluruh penjualan
+ * regulator ikut terhitung beredar setiap kali halaman di-refresh.
+ * Number(null) || 0 bernilai 0, jadi bentuk di bawah kebal keduanya.
  */
 const barisRegulator = (t: Transaction) =>
   Boolean(t.regulatorTariffId) && Number(t.regulatorQty) > 0 &&
-  (t.type === 'RETURN' || t.regulatorFee !== undefined);
+  !((Number(t.regulatorSalePrice) || 0) > 0);
 
 /**
  * Berapa unit regulator bekas yang sedang dipegang seorang pelanggan, untuk

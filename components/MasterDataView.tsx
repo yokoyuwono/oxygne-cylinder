@@ -252,7 +252,7 @@ const MasterDataView: React.FC<MasterDataViewProps> = ({ tariffs, transactions, 
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {regulatorTariffs.length === 0 ? (
-                  <tr><td colSpan={8} className="px-6 py-10 text-center text-gray-400">Belum ada tarif regulator.</td></tr>
+                  <tr><td colSpan={9} className="px-6 py-10 text-center text-gray-400">Belum ada tarif regulator.</td></tr>
                 ) : regulatorTariffs.map(t => {
                   const sedangDisewa = totalRegulatorBeredar(transactions, t.id);
                   const tersediaSewa = Math.max(0, (t.regulatorUsedStock || 0) - sedangDisewa);
