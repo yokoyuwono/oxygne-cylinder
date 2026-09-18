@@ -68,6 +68,16 @@ export const uangMasukBaris = (t: Transaction) =>
 export const uangKeluarBaris = (t: Transaction) =>
   (barisPengeluaran(t) ? Number(t.cost) || 0 : 0) + depositKeluar(t);
 
+/*
+ * CATATAN PEMAKAIAN: kedua fungsi di atas adalah ARUS KAS -- titipan ikut di dalamnya.
+ * Karena itu keduanya sengaja TIDAK dipakai untuk memecah pemasukan per metode bayar.
+ * Rincian per metode harus menjumlah persis sama dengan Pemasukan, angka yang sama
+ * dengan yang memberi makan Laba Bersih; memakai arus kas di sana membuat titipan
+ * (uang pelanggan yang harus dikembalikan) ikut terbaca sebagai pemasukan tunai, dan
+ * totalnya berselisih dengan laba tepat sebesar deposit hari itu -- lihat
+ * lib/metodeBayar.ts.
+ */
+
 /**
  * Tanggal lokal sebuah transaksi dalam bentuk YYYY-MM-DD, siap dibandingkan dengan
  * nilai <input type="date">.
@@ -93,6 +103,19 @@ export interface LaporanHarian {
   /** Pendapatan saja -- angka yang sama dengan yang memberi makan Laba Bersih. */
   pemasukan: number;
   pengeluaran: number;
+  /**
+   * Pemasukan dikurangi pengeluaran: hasil hari itu setelah belanja dan biaya isi
+   * ulang dibayar.
+   *
+   * Dipisahkan di sini, bukan diserahkan ke pembaca laporan, supaya pengeluaran
+   * langsung terlihat mengurangi pemasukan pada hari yang sama. Sebelumnya kedua
+   * angka hanya berdiri sendiri-sendiri sebagai dua kartu, dan yang mencatat
+   * pengeluaran tidak melihat angkanya bergerak sama sekali.
+   *
+   * Titipan tidak ikut -- deposit bukan pendapatan, jadi uang yang harus dikembalikan
+   * tidak boleh muncul sebagai laba.
+   */
+  labaBersih: number;
   jumlahTransaksi: number;
   /** Titipan yang diterima dan dikembalikan hari itu. Bukan laba, tapi tetap uang. */
   depositMasuk: number;
@@ -123,6 +146,7 @@ export function hitungLaporanHarian(transactions: Transaction[], tanggal: string
     transaksi,
     pemasukan,
     pengeluaran,
+    labaBersih: pemasukan - pengeluaran,
     jumlahTransaksi: transaksi.length,
     depositMasuk: masukDeposit,
     depositKeluar: keluarDeposit,

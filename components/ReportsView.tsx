@@ -268,7 +268,10 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
   // Satu hari biasanya pendek, tapi hari sibuk bisa panjang -- dan komponennya sudah ada.
   const halamanHarian = usePaginasi(laporanHarian.transaksi, BARIS_PER_HALAMAN);
 
-  // Memecah kartu Pemasukan supaya uang di laci bisa dicocokkan dengan yang di rekening.
+  // Memecah kartu Pemasukan menurut metode bayarnya. Rinciannya menjumlah persis sama
+  // dengan Pemasukannya, jadi angka di sini bisa ditelusuri sampai ke kartu di atasnya
+  // -- termasuk baris "Belum Dibayar" yang memang bagian dari pemasukan hari itu.
+  // Titipan deposit tidak ikut: ia bukan pendapatan dan tempatnya di kartu arus kas.
   const pemasukanPerMetode = useMemo(
       () => rekapPemasukanPerMetode(laporanHarian.transaksi),
       [laporanHarian.transaksi]);
@@ -592,19 +595,22 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
               </div>
 
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                  {/* Uang masuk dipecah di kartunya sendiri, bukan di kartu terpisah di
-                      bawah: yang dicari saat membuka laporan adalah baris ringkasan ini,
-                      dan angka yang harus dicocokkan dengan laci ada di sini.
+                  {/* Pemasukan dipecah di kartunya sendiri, bukan di kartu terpisah di
+                      bawah: yang dicari saat membuka laporan adalah baris ringkasan ini.
 
-                      Disebut "Uang Masuk", bukan "Pemasukan", karena deposit jaminan ikut
-                      terhitung -- dan deposit bukan pendapatan. Tab Keuangan memakai kata
-                      "Pemasukan" untuk angka yang memberi makan Laba Bersih; dua layar
-                      dengan satu nama tapi dua arti adalah cara paling mudah membuat orang
-                      salah membaca labanya sendiri. */}
+                      Kartunya bernama "Pemasukan" dan memuat angka yang sama dengan yang
+                      memberi makan Laba Bersih -- rincian per metode di bawahnya menjumlah
+                      persis sama dengan kartunya.
+
+                      Deposit jaminan sengaja TIDAK ikut di sini. Titipan bukan pendapatan,
+                      dan menempatkannya di baris "Tunai" membuat uang pelanggan yang harus
+                      dikembalikan terbaca sebagai pemasukan tunai. Uang yang benar-benar
+                      masuk laci dan rekening tetap ditampilkan, satu baris di bawah
+                      ringkasan ini dengan sebutan yang tidak bisa tertukar. */}
                   <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm col-span-2 lg:col-span-1">
-                      <p className="text-xs text-gray-500 uppercase font-bold">Uang Masuk</p>
-                      <p className="text-2xl font-bold text-green-600">{formatIDR(laporanHarian.uangMasuk)}</p>
-                      <p className="text-[11px] text-gray-400 mt-0.5">Yang harus cocok dengan isi laci dan rekening hari ini.</p>
+                      <p className="text-xs text-gray-500 uppercase font-bold">Pemasukan</p>
+                      <p className="text-2xl font-bold text-green-600">{formatIDR(laporanHarian.pemasukan)}</p>
+                      <p className="text-[11px] text-gray-400 mt-0.5">Pendapatan hari ini, tanpa titipan deposit.</p>
 
                       {/* Melebar penuh di HP: setengah lebar memotong nama kelompok jadi
                           "Tidak Dic..." -- rincian yang tidak terbaca tidak ada gunanya. */}
@@ -629,24 +635,43 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                           Keduanya kelihatan sama di laporan -- sama-sama rupiah masuk hari
                           itu -- padahal yang satu barangnya akan kembali dan yang satu tidak
                           pernah. Justru pemisahan itu yang dicari saat membuka laporan. */}
-                      {(laporanHarian.depositMasuk > 0 || regulatorHarian.total > 0) && (
+                      {/* Uang yang benar-benar masuk laci dan rekening hari ini, dipisah dari
+                          Pemasukan di atasnya: angka ini ikut memuat titipan deposit.
+
+                          Ditempatkan sebelum "Di antaranya" supaya batasnya jelas -- yang
+                          di atas pendapatan, baris ini arus kas, dan yang paling bawah irisan
+                          dari pendapatan. */}
+                      {laporanHarian.depositMasuk > 0 && (
+                          <div className="mt-3 pt-3 border-t border-dashed border-gray-200 space-y-2">
+                              <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Termasuk titipan</p>
+
+                              <div className="flex items-center justify-between gap-2">
+                                  <span className="flex items-center gap-1.5 min-w-0 text-gray-500">
+                                      <span className="material-icons text-sm text-gray-400 shrink-0">account_balance_wallet</span>
+                                      <span className="text-xs truncate">Uang masuk laci &amp; rekening</span>
+                                  </span>
+                                  <span className="text-sm font-bold text-gray-800 whitespace-nowrap">{formatIDR(laporanHarian.uangMasuk)}</span>
+                              </div>
+                              <p className="text-[11px] text-gray-400 -mt-1 pl-6">
+                                  Pemasukan ditambah deposit yang masuk hari ini. Yang dicocokkan dengan isi laci dan rekening, bukan angka Pemasukan di atas.
+                              </p>
+
+                              <div className="flex items-center justify-between gap-2">
+                                  <span className="flex items-center gap-1.5 min-w-0 text-gray-500">
+                                      <span className="material-icons text-sm text-gray-400 shrink-0">savings</span>
+                                      <span className="text-xs truncate">Deposit jaminan</span>
+                                  </span>
+                                  <span className="text-sm font-bold text-gray-800 whitespace-nowrap">{formatIDR(laporanHarian.depositMasuk)}</span>
+                              </div>
+                              <p className="text-[11px] text-gray-400 -mt-1 pl-6">
+                                  Titipan pelanggan, dikembalikan saat berhenti menyewa. Bukan pemasukan, jadi tidak ikut di rincian metode di atas.
+                              </p>
+                          </div>
+                      )}
+
+                      {regulatorHarian.total > 0 && (
                           <div className="mt-3 pt-3 border-t border-dashed border-gray-200 space-y-2">
                               <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Di antaranya</p>
-
-                              {laporanHarian.depositMasuk > 0 && (
-                                  <>
-                                      <div className="flex items-center justify-between gap-2">
-                                          <span className="flex items-center gap-1.5 min-w-0 text-gray-500">
-                                              <span className="material-icons text-sm text-gray-400 shrink-0">savings</span>
-                                              <span className="text-xs truncate">Deposit jaminan</span>
-                                          </span>
-                                          <span className="text-sm font-bold text-gray-800 whitespace-nowrap">{formatIDR(laporanHarian.depositMasuk)}</span>
-                                      </div>
-                                      <p className="text-[11px] text-gray-400 -mt-1 pl-6">
-                                          Titipan pelanggan, dikembalikan saat berhenti menyewa. Tidak dihitung sebagai laba.
-                                      </p>
-                                  </>
-                              )}
 
                               {regulatorHarian.total > 0 && (
                               <div className="flex items-center justify-between gap-2">
@@ -691,6 +716,23 @@ const ReportsView: React.FC<ReportsViewProps> = ({ cylinders, transactions, memb
                               Termasuk {formatIDR(laporanHarian.depositKeluar)} deposit yang dikembalikan.
                           </p>
                       )}
+                  </div>
+                  {/* Hasil hari itu, berdiri tepat setelah pemasukan dan pengeluaran.
+                      Sebelumnya pengeluaran cuma punya kartunya sendiri dan tidak pernah
+                      terlihat mengurangi apa pun -- yang mencatat belanja tidak melihat satu
+                      angka pun bergerak pada hari itu. Kartu ini yang membuat pengurangannya
+                      terbaca langsung, bukan saat menutup bulan.
+
+                      Titipan deposit tidak ikut: uang yang harus dikembalikan tidak boleh
+                      pernah muncul sebagai laba. */}
+                  <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                      <p className="text-xs text-gray-500 uppercase font-bold">Laba Bersih</p>
+                      <p className={`text-2xl font-bold ${laporanHarian.labaBersih >= 0 ? 'text-indigo-600' : 'text-rose-600'}`}>
+                          {formatIDR(laporanHarian.labaBersih)}
+                      </p>
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                          Pemasukan {formatIDR(laporanHarian.pemasukan)} &minus; pengeluaran {formatIDR(laporanHarian.pengeluaran)}. Rincian metode di kartu Pemasukan menjumlah persis ke angka pemasukan ini.
+                      </p>
                   </div>
                   <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
                       <p className="text-xs text-gray-500 uppercase font-bold">Jumlah Transaksi</p>
