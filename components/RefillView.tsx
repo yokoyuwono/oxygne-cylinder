@@ -1,8 +1,12 @@
 ﻿import React, { useState, useMemo } from 'react';
-import { Cylinder, CylinderStatus, RefillStation, GasType, RefillPrice, RefillDraft, PenukaranTabung, CylinderSize, Transaction } from '../types';
+import { Cylinder, CylinderStatus, RefillStation, GasType, RefillPrice, RefillDraft, PenukaranTabung, CylinderSize, Transaction, GasOrder } from '../types';
 import { labelStatusTabung } from '../labels';
 import { urutkanTabung } from '../lib/urutanTabung';
-import { hargaVendorTabung, perkiraanBiayaTerima, periksaBiayaTerima, rincianBiayaTerima } from '../lib/isiUlang';
+import {
+    hargaVendorTabung, perkiraanBiayaTerima, periksaBiayaTerima, rincianBiayaTerima,
+    hargaTitipan, perkiraanBiayaTitipan, SKU_TITIPAN
+} from '../lib/isiUlang';
+import { titipanSiapKirim, titipanDiPabrik, umurPesanan, AMBANG_PESANAN_LAMA } from '../lib/antrianIsi';
 import RefillHistory from './RefillHistory';
 
 interface RefillViewProps {
@@ -10,13 +14,14 @@ interface RefillViewProps {
     stations: RefillStation[];
     refillPrices: RefillPrice[];
     transactions: Transaction[];
+    gasOrders: GasOrder[];
     drafts: RefillDraft[];
     currentUserName?: string;
     onUpdateRefillPrices: (prices: RefillPrice[]) => void;
-    onSaveDraft: (stationId: string, cylinderIds: string[]) => Promise<void>;
+    onSaveDraft: (stationId: string, cylinderIds: string[], orderIds: string[]) => Promise<void>;
     onDeleteDraft: (stationId: string) => Promise<void>;
-    onSendToRefill: (stationId: string, cylinderIds: string[]) => void;
-    onReceiveFromRefill: (cylinderIds: string[], totalCost: number, penukaran: PenukaranTabung[]) => Promise<void>;
+    onSendToRefill: (stationId: string, cylinderIds: string[], orderIds: string[]) => Promise<void>;
+    onReceiveFromRefill: (cylinderIds: string[], totalCost: number, penukaran: PenukaranTabung[], orderIds: string[]) => Promise<void>;
     onAddStation: (station: RefillStation) => void;
     onUpdateStation: (station: RefillStation) => void;
     onDeleteStation: (id: string) => void;
@@ -27,6 +32,7 @@ const RefillView: React.FC<RefillViewProps> = ({
     stations,
     refillPrices,
     transactions,
+    gasOrders,
     drafts,
     currentUserName,
     onUpdateRefillPrices,
@@ -40,6 +46,13 @@ const RefillView: React.FC<RefillViewProps> = ({
 }) => {
     const [activeTab, setActiveTab] = useState<'dispatch' | 'restock' | 'stations' | 'history'>('dispatch');
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    // Sengaja TIDAK menumpang selectedIds. Isinya id PESANAN, dan selectedIds dibaca
+    // di banyak tempat sebagai id tabung -- cylinders.find() yang tidak ketemu tidak
+    // melempar error, ia diam-diam melewatkan barisnya (lihat getDispatchSummary dan
+    // perkiraanBiayaTerima). Satu id yang bocor antar tab berarti satu pesanan hilang
+    // dari perkiraan tanpa satu pun tanda.
+    const [titipanKirim, setTitipanKirim] = useState<string[]>([]);   // tab Pengiriman
+    const [titipanPulang, setTitipanPulang] = useState<string[]>([]); // tab Terima Kembali
     const [selectedStationId, setSelectedStationId] = useState<string>('');
     const [cariTabung, setCariTabung] = useState('');
     const [restockCost, setRestockCost] = useState<string>('');
@@ -84,6 +97,14 @@ const RefillView: React.FC<RefillViewProps> = ({
         () => urutkanTabung(cylinders.filter(c => c.status === CylinderStatus.Refilling)),
         [cylinders]);
 
+    // Pesanan titip isi pelanggan -- tidak difilter per vendor seperti tabung toko.
+    // Fisiknya tetap harus naik truk apa pun isinya daftar harga vendor; tabung toko
+    // yang tersaring dari vendorCompatibleCylinders memang tidak layak dikirim ke
+    // sana, tapi menyembunyikan titipan dengan cara yang sama mengulang bug yang
+    // sedang diperbaiki: tabung yang tidak bisa berangkat ke mana-mana.
+    const titipanTersedia = useMemo(() => titipanSiapKirim(gasOrders), [gasOrders]);
+    const titipanKembali = useMemo(() => titipanDiPabrik(gasOrders), [gasOrders]);
+
     const petaPenukaran = useMemo(
         () => new Map(penukaran.map(p => [p.lamaId, p])),
         [penukaran]);
@@ -99,17 +120,31 @@ const RefillView: React.FC<RefillViewProps> = ({
         ?? cylinders.find(c => c.id === p.penggantiId)?.serialCode
         ?? '-';
 
-    /** Tabung yang benar-benar masuk gudang: yang pulang sendiri ditambah penggantinya. */
-    const totalDiterima = selectedIds.length + penukaran.length;
+    /** Titipan yang tercentang pulang di tab Terima Kembali. */
+    const titipanTerpilihPulang = useMemo(
+        () => titipanKembali.filter(o => titipanPulang.includes(o.id)),
+        [titipanKembali, titipanPulang]);
+
+    /** Bagian dari titipanTerpilihPulang yang harga YK-nya tidak ketemu di vendornya sendiri. */
+    const jumlahTitipanPulangTanpaHarga = useMemo(
+        () => titipanTerpilihPulang.filter(
+            o => !hargaTitipan(o, refillPrices.filter(p => p.stationId === o.refillStationId))
+        ).length,
+        [titipanTerpilihPulang, refillPrices]);
+
+    /** Tabung yang benar-benar masuk gudang: yang pulang sendiri, penggantinya, dan titipan. */
+    const totalDiterima = selectedIds.length + penukaran.length + titipanTerpilihPulang.length;
 
     /**
      * Berapa seharusnya batch ini dibayar menurut daftar harga vendor, dan seberapa jauh
      * nominal yang diketik menyimpang darinya. Angka ini cuma penuntun -- lihat
      * lib/isiUlang.ts untuk alasan kenapa selisih diperingatkan, bukan ditolak.
+     *
+     * Titipan ikut dijumlahkan: satu nota pabrik memang mencakup keduanya sekaligus.
      */
     const perkiraanTerima = useMemo(
-        () => perkiraanBiayaTerima(selectedIds, penukaran, cylinders, transactions, refillPrices),
-        [selectedIds, penukaran, cylinders, transactions, refillPrices]);
+        () => perkiraanBiayaTerima(selectedIds, penukaran, cylinders, transactions, refillPrices, titipanTerpilihPulang),
+        [selectedIds, penukaran, cylinders, transactions, refillPrices, titipanTerpilihPulang]);
 
     const biayaDiketik = parseFloat(restockCost) || 0;
     const pemeriksaanBiaya = periksaBiayaTerima(biayaDiketik, totalDiterima, perkiraanTerima);
@@ -135,6 +170,15 @@ const RefillView: React.FC<RefillViewProps> = ({
 
         return emptyCylinders.filter(c => !!hargaVendorTabung(c, vendorPrices));
     }, [emptyCylinders, vendorPrices, selectedStationId]);
+
+    /** Titipan yang tercentang kirim di tab Pengiriman, dan perkiraan biayanya. */
+    const titipanTerpilihKirim = useMemo(
+        () => titipanTersedia.filter(o => titipanKirim.includes(o.id)),
+        [titipanTersedia, titipanKirim]);
+
+    const perkiraanTitipanKirim = useMemo(
+        () => perkiraanBiayaTitipan(titipanTerpilihKirim, vendorPrices),
+        [titipanTerpilihKirim, vendorPrices]);
 
     // 3. Saring lagi dengan kata kunci petugas (kode seri, jenis gas, ukuran, lokasi)
     const tabungTampil = useMemo(() => {
@@ -166,52 +210,72 @@ const RefillView: React.FC<RefillViewProps> = ({
         return drafVendor.cylinderIds.filter(id => layak.has(id));
     }, [drafVendor, vendorCompatibleCylinders]);
 
+    /** Pesanan titipan dalam draf yang masih MENUNGGU -- tidak disaring per vendor. */
+    const idsDrafTitipanLayak = useMemo(() => {
+        if (!drafVendor) return [];
+        const layak = new Set(titipanTersedia.map(o => o.id));
+        return (drafVendor.orderIds || []).filter(id => layak.has(id));
+    }, [drafVendor, titipanTersedia]);
+
     /** Pilihan di layar sudah berbeda dari isi draf yang tersimpan. */
     const adaPerubahanBelumTersimpan = useMemo(() => {
         if (selectedIds.length !== idsDrafLayak.length) return true;
-        const tersimpan = new Set(idsDrafLayak);
-        return selectedIds.some(id => !tersimpan.has(id));
-    }, [selectedIds, idsDrafLayak]);
+        if (titipanKirim.length !== idsDrafTitipanLayak.length) return true;
+        const tersimpanTabung = new Set(idsDrafLayak);
+        const tersimpanTitipan = new Set(idsDrafTitipanLayak);
+        if (selectedIds.some(id => !tersimpanTabung.has(id))) return true;
+        return titipanKirim.some(id => !tersimpanTitipan.has(id));
+    }, [selectedIds, idsDrafLayak, titipanKirim, idsDrafTitipanLayak]);
 
     /**
      * Kembalikan isi draf vendor ke centangan di layar.
      *
      * Draf adalah tebakan tentang masa depan, dan kenyataan bergerak di belakangnya:
      * tabung yang dicentang kemarin bisa sudah disewa pelanggan atau dikirim petugas
-     * lain dari perangkat lain. Yang begitu dilewati -- tapi jumlahnya dikabarkan,
-     * karena draf yang diam-diam menyusut lebih mirip kerusakan daripada penyesuaian.
+     * lain dari perangkat lain, dan pesanan titipan bisa saja sudah diserahkan atau
+     * dibatalkan. Yang begitu dilewati -- tapi jumlahnya dikabarkan, karena draf yang
+     * diam-diam menyusut lebih mirip kerusakan daripada penyesuaian.
      */
     const muatDrafVendor = (stationId: string, kabari: boolean) => {
         const draf = drafts.find(d => d.stationId === stationId);
         if (!stationId || !draf) {
             setSelectedIds([]);
+            setTitipanKirim([]);
             return;
         }
 
-        const layak = new Set(tabungCocokUntuk(stationId).map(c => c.id));
-        const dipulihkan = draf.cylinderIds.filter(id => layak.has(id));
-        const gugur = draf.cylinderIds.length - dipulihkan.length;
+        const layakTabung = new Set(tabungCocokUntuk(stationId).map(c => c.id));
+        const dipulihkanTabung = draf.cylinderIds.filter(id => layakTabung.has(id));
+        const gugurTabung = draf.cylinderIds.length - dipulihkanTabung.length;
 
-        setSelectedIds(dipulihkan);
+        const layakTitipan = new Set(titipanTersedia.map(o => o.id));
+        const dipulihkanTitipan = (draf.orderIds || []).filter(id => layakTitipan.has(id));
+        const gugurTitipan = (draf.orderIds || []).length - dipulihkanTitipan.length;
+
+        setSelectedIds(dipulihkanTabung);
+        setTitipanKirim(dipulihkanTitipan);
 
         if (!kabari) return;
-        if (gugur > 0) {
+        const totalDipulihkan = dipulihkanTabung.length + dipulihkanTitipan.length;
+        const totalGugur = gugurTabung + gugurTitipan;
+
+        if (totalGugur > 0) {
             showFeedback(
-                `Draf dimuat: ${dipulihkan.length} tabung. ${gugur} tabung sudah tidak tersedia dan dilewati.`,
+                `Draf dimuat: ${totalDipulihkan} item. ${totalGugur} item sudah tidak tersedia dan dilewati.`,
                 'warning'
             );
         } else {
-            showFeedback(`Draf dimuat: ${dipulihkan.length} tabung dipilih.`);
+            showFeedback(`Draf dimuat: ${totalDipulihkan} item dipilih.`);
         }
     };
 
     const handleSaveDraft = async () => {
-        if (!selectedStationId || selectedIds.length === 0) return;
+        if (!selectedStationId || (selectedIds.length === 0 && titipanKirim.length === 0)) return;
 
         setSedangSimpanDraf(true);
         try {
-            await onSaveDraft(selectedStationId, selectedIds);
-            showFeedback(`Draf disimpan: ${selectedIds.length} tabung. Bisa dilanjutkan nanti.`);
+            await onSaveDraft(selectedStationId, selectedIds, titipanKirim);
+            showFeedback(`Draf disimpan: ${selectedIds.length + titipanKirim.length} item. Bisa dilanjutkan nanti.`);
         } catch {
             showFeedback('Draf gagal disimpan. Periksa koneksi lalu coba lagi.', 'error');
         } finally {
@@ -225,6 +289,7 @@ const RefillView: React.FC<RefillViewProps> = ({
         try {
             await onDeleteDraft(selectedStationId);
             setSelectedIds([]);
+            setTitipanKirim([]);
             showFeedback('Draf dihapus.');
         } catch {
             showFeedback('Draf gagal dihapus. Coba lagi.', 'error');
@@ -257,6 +322,28 @@ const RefillView: React.FC<RefillViewProps> = ({
         }
     };
 
+    const toggleTitipanKirim = (id: string) => {
+        setTitipanKirim(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    };
+
+    const semuaTitipanKirimTerpilih = titipanTersedia.length > 0
+        && titipanTersedia.every(o => titipanKirim.includes(o.id));
+
+    const handleSelectAllTitipanKirim = () => {
+        setTitipanKirim(semuaTitipanKirimTerpilih ? [] : titipanTersedia.map(o => o.id));
+    };
+
+    const toggleTitipanPulang = (id: string) => {
+        setTitipanPulang(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    };
+
+    const semuaTitipanPulangTerpilih = titipanKembali.length > 0
+        && titipanKembali.every(o => titipanPulang.includes(o.id));
+
+    const handleSelectAllTitipanPulang = () => {
+        setTitipanPulang(semuaTitipanPulangTerpilih ? [] : titipanKembali.map(o => o.id));
+    };
+
     const getDispatchSummary = () => {
         if (!selectedStationId || selectedIds.length === 0) return [];
 
@@ -278,6 +365,34 @@ const RefillView: React.FC<RefillViewProps> = ({
                     hasPrice: !!priceEntry,
                     gas: cyl.gasType,
                     size: cyl.size
+                };
+            }
+            summaryMap[key].count++;
+        });
+        return Object.values(summaryMap);
+    };
+
+    /**
+     * Manifes titipan, dipisah dari manifes tabung toko dengan sengaja. Ini yang
+     * dibaca sopir dan petugas pabrik: tabung titipan harus pulang ke orangnya, dan
+     * menyamarkannya jadi satu baris "Oxygen 6m3 x 23" dengan tabung toko menghapus
+     * satu-satunya tempat perbedaan itu terlihat.
+     */
+    const getTitipanManifestRows = () => {
+        const summaryMap: Record<string, { count: number, price: number, hasPrice: boolean, gas: string, size: string }> = {};
+
+        titipanTerpilihKirim.forEach(p => {
+            if (!p.gasType || !p.size) return;
+            const harga = hargaTitipan(p, vendorPrices);
+            const key = `${p.gasType}-${p.size}`;
+
+            if (!summaryMap[key]) {
+                summaryMap[key] = {
+                    count: 0,
+                    price: harga ? Number(harga.price) || 0 : 0,
+                    hasPrice: !!harga,
+                    gas: p.gasType,
+                    size: p.size
                 };
             }
             summaryMap[key].count++;
@@ -313,18 +428,30 @@ const RefillView: React.FC<RefillViewProps> = ({
     };
 
     const dispatchSummary = getDispatchSummary();
-    const estimatedCost = dispatchSummary.reduce((sum, item) => sum + (item.count * item.price), 0);
+    const estimatedCost = dispatchSummary.reduce((sum, item) => sum + (item.count * item.price), 0)
+        + perkiraanTitipanKirim.total;
 
     const handleDispatchClick = () => {
-        if (!selectedStationId || selectedIds.length === 0) return;
+        if (!selectedStationId || (selectedIds.length === 0 && titipanKirim.length === 0)) return;
         setIsDispatchConfirmOpen(true);
     };
 
-    const confirmDispatch = () => {
-        onSendToRefill(selectedStationId, selectedIds);
-        setSelectedIds([]);
-        setIsDispatchConfirmOpen(false);
-        showFeedback("Pengiriman berhasil. Tabung dikirim ke vendor.");
+    const confirmDispatch = async () => {
+        try {
+            await onSendToRefill(selectedStationId, selectedIds, titipanKirim);
+            setSelectedIds([]);
+            setTitipanKirim([]);
+            setIsDispatchConfirmOpen(false);
+            showFeedback("Pengiriman berhasil. Tabung dikirim ke vendor.");
+        } catch (err) {
+            // Pilihan di layar sengaja dibiarkan utuh supaya petugas tinggal mencoba
+            // lagi, sama seperti confirmRestock.
+            setIsDispatchConfirmOpen(false);
+            showFeedback(
+                err instanceof Error ? err.message : 'Pengiriman gagal disimpan. Periksa koneksi lalu coba lagi.',
+                'error'
+            );
+        }
     };
 
     const handleRestockClick = () => {
@@ -336,17 +463,23 @@ const RefillView: React.FC<RefillViewProps> = ({
         const cost = parseFloat(restockCost) || 0;
 
         try {
-            await onReceiveFromRefill(selectedIds, cost, penukaran);
+            await onReceiveFromRefill(selectedIds, cost, penukaran, titipanPulang);
             setSelectedIds([]);
             setPenukaran([]);
+            setTitipanPulang([]);
             setRestockCost('');
             setIsRestockConfirmOpen(false);
             showFeedback("Penerimaan berhasil. Stok diperbarui.");
-        } catch {
-            // Penyimpanan tabung pengganti gagal, jadi tidak ada yang berubah. Pilihan
-            // di layar sengaja dibiarkan utuh supaya petugas tinggal mencoba lagi.
+        } catch (err) {
+            // Pilihan di layar sengaja dibiarkan utuh supaya petugas tinggal mencoba
+            // lagi. Pesan errornya bisa membawa peringatan penting -- misalnya biaya
+            // isi titipan yang sudah tercatat sebagian -- jadi ditampilkan apa adanya
+            // kalau ada, bukan diseragamkan jadi pesan generik.
             setIsRestockConfirmOpen(false);
-            showFeedback('Penerimaan gagal disimpan. Periksa koneksi lalu coba lagi.', 'error');
+            showFeedback(
+                err instanceof Error ? err.message : 'Penerimaan gagal disimpan. Periksa koneksi lalu coba lagi.',
+                'error'
+            );
         }
     };
 
@@ -599,6 +732,9 @@ const RefillView: React.FC<RefillViewProps> = ({
                 {perkiraan.jumlahTanpaHarga > 0 && perkiraan.jumlahBerharga > 0 && (
                     <p className="text-[11px] text-gray-400 leading-snug">
                         Baru mencakup {perkiraan.jumlahBerharga} dari {totalDiterima} tabung — sisanya belum punya harga vendor.
+                        {jumlahTitipanPulangTanpaHarga > 0 && (
+                            <> Termasuk {jumlahTitipanPulangTanpaHarga} tabung titipan tanpa harga {SKU_TITIPAN}; biayanya ikut ke baris selisih.</>
+                        )}
                     </p>
                 )}
 
@@ -680,13 +816,22 @@ const RefillView: React.FC<RefillViewProps> = ({
                         onClick={() => {
                             setActiveTab(tab.id as any);
                             setCariTabung('');
-                            // Pilihan dipakai bersama oleh ketiga tab, jadi harus dikosongkan
-                            // saat berpindah. Kembali ke Pengiriman berarti kembali ke draf.
-                            if (tab.id === 'dispatch') muatDrafVendor(selectedStationId, false);
-                            else setSelectedIds([]);
-                            // Penukaran hanya hidup selama satu penerimaan disusun; ia belum
-                            // tersimpan di mana pun, jadi tidak boleh menyeberang tab.
-                            if (tab.id !== 'restock') setPenukaran([]);
+                            // selectedIds dan titipanKirim dipakai bersama tab Pengiriman dan
+                            // Terima Kembali, jadi harus dikosongkan saat berpindah. Kembali
+                            // ke Pengiriman berarti kembali ke draf.
+                            if (tab.id === 'dispatch') {
+                                muatDrafVendor(selectedStationId, false);
+                            } else {
+                                setSelectedIds([]);
+                                setTitipanKirim([]);
+                            }
+                            // Penukaran dan titipan yang pulang hanya hidup selama satu
+                            // penerimaan disusun; keduanya belum tersimpan di mana pun, jadi
+                            // tidak boleh menyeberang tab.
+                            if (tab.id !== 'restock') {
+                                setPenukaran([]);
+                                setTitipanPulang([]);
+                            }
                         }}
                         className={`pb-4 px-2 text-sm font-medium transition-all relative flex items-center gap-2 whitespace-nowrap ${activeTab === tab.id
                             ? 'text-indigo-600'
@@ -747,7 +892,8 @@ const RefillView: React.FC<RefillViewProps> = ({
                     {/* STEP 2: Cylinder List */}
                     {selectedStationId ? (
                         <div className="flex flex-col lg:flex-row gap-6">
-                            <div className="flex-1 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col min-h-[500px]">
+                            <div className="flex-1 flex flex-col gap-6 min-w-0">
+                            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col min-h-[400px]">
                                 {/* List Header */}
                                 <div className="p-4 bg-gray-50 border-b border-gray-100 sticky top-0 z-10 space-y-3">
                                     <div className="flex items-center justify-between gap-4">
@@ -872,6 +1018,83 @@ const RefillView: React.FC<RefillViewProps> = ({
                                 </div>
                             </div>
 
+                            {/* STEP 3: Tabung Titipan Pelanggan --
+                                Sengaja TIDAK disaring seperti vendorCompatibleCylinders. Tabung
+                                toko tanpa harga vendor memang tidak layak dikirim ke sana, tapi
+                                tabung titipan fisiknya tetap harus naik truk apa pun isinya
+                                daftar harga -- menyembunyikannya justru mengulang keadaan yang
+                                sedang diperbaiki, yaitu tabung yang tidak bisa berangkat ke
+                                mana-mana. */}
+                            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                                <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-4">
+                                    <div>
+                                        <h3 className="font-bold text-gray-800 text-sm">3. Tabung Titipan Pelanggan</h3>
+                                        <p className="text-xs text-gray-500">Tabung milik pelanggan sendiri -- ikut naik truk yang sama.</p>
+                                    </div>
+                                    {titipanTersedia.length > 0 && (
+                                        <button
+                                            onClick={handleSelectAllTitipanKirim}
+                                            className="text-sm text-indigo-600 font-medium hover:underline bg-white px-3 py-1 rounded border border-gray-200 whitespace-nowrap"
+                                        >
+                                            {semuaTitipanKirimTerpilih ? 'Batal Pilih Semua' : 'Pilih Semua'}
+                                        </button>
+                                    )}
+                                </div>
+
+                                {titipanTersedia.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-32 text-gray-400">
+                                        <p className="text-sm">Tidak ada tabung titipan yang menunggu.</p>
+                                    </div>
+                                ) : (
+                                    <div className="divide-y divide-gray-50">
+                                        {titipanTersedia.map(p => {
+                                            const harga = hargaTitipan(p, vendorPrices);
+                                            const umur = umurPesanan(p);
+                                            const terpilih = titipanKirim.includes(p.id);
+
+                                            return (
+                                                <div
+                                                    key={p.id}
+                                                    onClick={() => toggleTitipanKirim(p.id)}
+                                                    className={`flex items-center justify-between gap-3 px-4 py-3 cursor-pointer transition-colors ${terpilih ? 'bg-indigo-50/50' : 'hover:bg-gray-50'}`}
+                                                >
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <div className={`w-5 h-5 shrink-0 rounded border flex items-center justify-center transition-colors ${terpilih ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300 bg-white'}`}>
+                                                            {terpilih && <span className="material-icons text-white text-sm">check</span>}
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <span className="font-bold text-gray-800 truncate">{p.namaPembeli}</span>
+                                                                {p.serialTitipan && (
+                                                                    <span className="font-mono text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200">{p.serialTitipan}</span>
+                                                                )}
+                                                            </div>
+                                                            <div className="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
+                                                                <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{p.gasType}</span>
+                                                                <span>{p.size}</span>
+                                                                <span className={umur >= AMBANG_PESANAN_LAMA ? 'text-red-600 font-bold' : ''}>
+                                                                    {umur} hari
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right shrink-0">
+                                                        {harga ? (
+                                                            <p className="font-medium text-gray-700 text-sm">{formatIDR(harga.price)}</p>
+                                                        ) : (
+                                                            <span className="text-[10px] uppercase tracking-wide text-amber-700 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded">
+                                                                Harga {SKU_TITIPAN} belum ada
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                            </div>
+
                             {/* Summary / Action Panel */}
                             <div className="w-full lg:w-80 bg-white rounded-xl shadow-lg border border-gray-200 p-6 flex flex-col h-fit sticky top-6">
                                 <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -885,9 +1108,15 @@ const RefillView: React.FC<RefillViewProps> = ({
                                         <span className="font-medium text-gray-800 text-right">{stations.find(s => s.id === selectedStationId)?.name}</span>
                                     </div>
                                     <div className="flex justify-between text-sm">
-                                        <span className="text-gray-500">Item Dipilih</span>
+                                        <span className="text-gray-500">Tabung Toko</span>
                                         <span className="font-bold text-gray-800">{selectedIds.length}</span>
                                     </div>
+                                    {titipanKirim.length > 0 && (
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-gray-500">Tabung Titipan</span>
+                                            <span className="font-bold text-gray-800">{titipanKirim.length}</span>
+                                        </div>
+                                    )}
                                     <div className="border-t border-gray-100 pt-3 flex justify-between items-end">
                                         <span className="text-gray-500 text-sm">Perkiraan Biaya</span>
                                         <span className="font-bold text-xl text-indigo-600">{formatIDR(estimatedCost)}</span>
@@ -905,7 +1134,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                                 <span className={`material-icons text-sm ${adaPerubahanBelumTersimpan ? 'text-amber-600' : 'text-indigo-600'}`}>
                                                     {adaPerubahanBelumTersimpan ? 'edit_note' : 'bookmark'}
                                                 </span>
-                                                Draf tersimpan: {idsDrafLayak.length} tabung
+                                                Draf tersimpan: {idsDrafLayak.length + idsDrafTitipanLayak.length} item
                                             </div>
                                             <p className="text-gray-500 mt-1 leading-relaxed">
                                                 {drafVendor.updatedBy ? `Oleh ${drafVendor.updatedBy} • ` : ''}
@@ -919,7 +1148,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                                 </p>
                                             )}
                                         </div>
-                                    ) : selectedIds.length > 0 && (
+                                    ) : (selectedIds.length > 0 || titipanKirim.length > 0) && (
                                         <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg p-3 leading-relaxed">
                                             Belum final? Simpan dulu sebagai draf — pilihan ini bisa dilanjutkan nanti,
                                             juga dari perangkat lain.
@@ -929,7 +1158,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     <div className="flex gap-2">
                                         <button
                                             onClick={handleSaveDraft}
-                                            disabled={selectedIds.length === 0 || !adaPerubahanBelumTersimpan || sedangSimpanDraf}
+                                            disabled={(selectedIds.length === 0 && titipanKirim.length === 0) || !adaPerubahanBelumTersimpan || sedangSimpanDraf}
                                             className="flex-1 py-2.5 border border-indigo-200 bg-white hover:bg-indigo-50 disabled:bg-gray-50 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed text-indigo-700 rounded-lg text-sm font-bold transition-all flex justify-center items-center gap-2"
                                         >
                                             <span className="material-icons text-sm">{sedangSimpanDraf ? 'hourglass_empty' : 'save'}</span>
@@ -950,7 +1179,7 @@ const RefillView: React.FC<RefillViewProps> = ({
 
                                 <button
                                     onClick={handleDispatchClick}
-                                    disabled={selectedIds.length === 0}
+                                    disabled={selectedIds.length === 0 && titipanKirim.length === 0}
                                     className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-bold transition-all flex justify-center items-center gap-2 shadow-lg shadow-indigo-200"
                                 >
                                     <span>Kirim Sekarang</span>
@@ -972,7 +1201,8 @@ const RefillView: React.FC<RefillViewProps> = ({
             {activeTab === 'restock' && (
                 // ... (Rest of component unchanged)
                 <div className="flex flex-col lg:flex-row gap-6 animate-fade-in">
-                    <div className="flex-1 bg-white lg:bg-transparent rounded-xl lg:rounded-none lg:border-none shadow-sm lg:shadow-none border border-gray-200 lg:border-0 overflow-hidden flex flex-col">
+                    <div className="flex-1 flex flex-col gap-6 min-w-0">
+                    <div className="bg-white lg:bg-transparent rounded-xl lg:rounded-none lg:border-none shadow-sm lg:shadow-none border border-gray-200 lg:border-0 overflow-hidden flex flex-col">
                         {/* Summary Bar */}
                         <div className="p-4 bg-gray-50 lg:bg-gray-50 lg:border lg:border-gray-100 lg:rounded-t-xl border-b border-gray-100 flex items-center justify-between gap-6 sticky top-0 z-10 lg:static">
                             <div className="flex items-center gap-4 text-sm">
@@ -988,6 +1218,12 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     <div className="flex items-center gap-2">
                                         <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                                         <span className="text-gray-600">Ditukar: <strong>{penukaran.length}</strong></span>
+                                    </div>
+                                )}
+                                {titipanPulang.length > 0 && (
+                                    <div className="flex items-center gap-2">
+                                        <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                                        <span className="text-gray-600">Titipan: <strong>{titipanPulang.length}</strong></span>
                                     </div>
                                 )}
                             </div>
@@ -1106,6 +1342,72 @@ const RefillView: React.FC<RefillViewProps> = ({
                                 </div>
                             )}
                         </div>
+                    </div>
+
+                    {/* Tabung Titipan yang Pulang -- vendornya ditampilkan per baris karena satu
+                        penerimaan boleh memuat titipan dari lebih dari satu vendor sekaligus,
+                        persis seperti tabung toko yang juga tidak disaring per vendor di sini.
+                        Tanpa tombol Tukar: penukaran pabrik atas tabung milik pelanggan kejadian
+                        lain sama sekali, di luar cakupan ini. */}
+                    {titipanKembali.length > 0 && (
+                        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                            <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-4">
+                                <h3 className="font-bold text-gray-800 text-sm">Tabung Titipan yang Pulang</h3>
+                                <button
+                                    onClick={handleSelectAllTitipanPulang}
+                                    className="text-sm text-indigo-600 font-medium hover:underline bg-white px-3 py-1 rounded border border-gray-200 whitespace-nowrap"
+                                >
+                                    {semuaTitipanPulangTerpilih ? 'Batal Pilih Semua' : 'Pilih Semua'}
+                                </button>
+                            </div>
+                            <div className="divide-y divide-gray-50">
+                                {titipanKembali.map(p => {
+                                    const vendor = stations.find(s => s.id === p.refillStationId);
+                                    const harga = hargaTitipan(p, refillPrices.filter(x => x.stationId === p.refillStationId));
+                                    const terpilih = titipanPulang.includes(p.id);
+
+                                    return (
+                                        <div
+                                            key={p.id}
+                                            onClick={() => toggleTitipanPulang(p.id)}
+                                            className={`flex items-center justify-between gap-3 px-4 py-3 cursor-pointer transition-colors ${terpilih ? 'bg-indigo-50/50' : 'hover:bg-gray-50'}`}
+                                        >
+                                            <div className="flex items-center gap-3 min-w-0">
+                                                <div className={`w-5 h-5 shrink-0 rounded border flex items-center justify-center transition-colors ${terpilih ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300 bg-white'}`}>
+                                                    {terpilih && <span className="material-icons text-white text-sm">check</span>}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className="font-bold text-gray-800 truncate">{p.namaPembeli}</span>
+                                                        {p.serialTitipan && (
+                                                            <span className="font-mono text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200">{p.serialTitipan}</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
+                                                        <span className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{p.gasType}</span>
+                                                        <span>{p.size}</span>
+                                                        <span className="flex items-center gap-1">
+                                                            <span className="material-icons text-[10px] text-gray-400">store</span>
+                                                            {vendor?.name || 'Vendor tidak diketahui'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="text-right shrink-0">
+                                                {harga ? (
+                                                    <p className="font-medium text-gray-700 text-sm">{formatIDR(harga.price)}</p>
+                                                ) : (
+                                                    <span className="text-[10px] uppercase tracking-wide text-amber-700 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded">
+                                                        Harga {SKU_TITIPAN} belum ada
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
                     </div>
 
                     {/* Desktop Sidebar */}
@@ -1349,6 +1651,20 @@ const RefillView: React.FC<RefillViewProps> = ({
                                                 </td>
                                             </tr>
                                         ))}
+                                        {/* Titipan dipisah dari baris gas toko: manifes ini dibaca sopir,
+                                            dan tabung titipan harus pulang ke orangnya. */}
+                                        {getTitipanManifestRows().map((item, idx) => (
+                                            <tr key={`titipan-${idx}`}>
+                                                <td className="px-4 py-2">
+                                                    <div className="font-medium text-gray-800">Titip Isi — {item.gas}</div>
+                                                    <div className="text-xs text-gray-500">{item.size} · {item.hasPrice ? `SKU ${SKU_TITIPAN}` : `harga ${SKU_TITIPAN} belum ada`}</div>
+                                                </td>
+                                                <td className="px-4 py-2 text-center">{item.count}</td>
+                                                <td className="px-4 py-2 text-right font-medium">
+                                                    {item.hasPrice ? formatIDR(item.count * item.price) : '—'}
+                                                </td>
+                                            </tr>
+                                        ))}
                                     </tbody>
                                     <tfoot className="bg-gray-50 font-bold text-gray-800 border-t border-gray-200 sticky bottom-0">
                                         <tr>
@@ -1358,6 +1674,12 @@ const RefillView: React.FC<RefillViewProps> = ({
                                     </tfoot>
                                 </table>
                             </div>
+
+                            {perkiraanTitipanKirim.jumlahTanpaHarga > 0 && (
+                                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-4">
+                                    {perkiraanTitipanKirim.jumlahTanpaHarga} tabung titipan belum punya harga {SKU_TITIPAN} — biayanya akan masuk selisih saat nota pabrik dicatat.
+                                </p>
+                            )}
 
                             <div className="flex justify-end gap-3 pt-2">
                                 <button
@@ -1395,7 +1717,7 @@ const RefillView: React.FC<RefillViewProps> = ({
                         <div className="p-6">
                             <p className="text-gray-600 text-sm leading-relaxed mb-2">
                                 Draf untuk <strong>{stations.find(s => s.id === selectedStationId)?.name}</strong> berisi{' '}
-                                <strong>{idsDrafLayak.length} tabung</strong> akan dibuang, dan centangan di layar ikut dikosongkan.
+                                <strong>{idsDrafLayak.length + idsDrafTitipanLayak.length} item</strong> akan dibuang, dan centangan di layar ikut dikosongkan.
                             </p>
                             <p className="text-gray-400 text-xs mb-6">
                                 Tidak ada tabung yang berpindah — draf memang belum pernah jadi pengiriman.
@@ -1469,6 +1791,23 @@ const RefillView: React.FC<RefillViewProps> = ({
                                         })}
                                         <p className="text-xs text-amber-800 pt-1 border-t border-amber-200">
                                             Kode seri lama akan ditutup jadi <strong>Tidak Diketahui</strong> dan tidak lagi terhitung sebagai stok.
+                                        </p>
+                                    </div>
+                                </>
+                            )}
+
+                            {titipanTerpilihPulang.length > 0 && (
+                                <>
+                                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Tabung Titipan Pulang</h4>
+                                    <div className="border border-purple-200 bg-purple-50 rounded-lg p-3 mb-6 space-y-2">
+                                        {titipanTerpilihPulang.map(p => (
+                                            <div key={p.id} className="flex items-center justify-between gap-2 text-sm">
+                                                <span className="text-gray-700 truncate">{p.namaPembeli}</span>
+                                                {p.serialTitipan && <span className="font-mono text-xs text-purple-900">{p.serialTitipan}</span>}
+                                            </div>
+                                        ))}
+                                        <p className="text-xs text-purple-800 pt-1 border-t border-purple-200">
+                                            Pesanannya kembali jadi Menunggu Isi dan siap diserahkan ke pelanggan.
                                         </p>
                                     </div>
                                 </>

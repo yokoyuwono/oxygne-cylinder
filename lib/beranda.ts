@@ -10,7 +10,7 @@ import {
   Transaction,
 } from '../types';
 import { formatIDR } from '../labels';
-import { AMBANG_PESANAN_LAMA, pesananLama, pesananTertunda } from './antrianIsi';
+import { AMBANG_PESANAN_LAMA, pesananLama, pesananTertunda, titipanSiapKirim } from './antrianIsi';
 import { tarifCurahAktif, totalRegulatorBeredar } from './bulkStock';
 import { hitungSemuaHolding, hitungStatusMasaTunggu } from './memberExit';
 import { peringkatPrefiks, prefiksTabung } from './urutanTabung';
@@ -145,6 +145,20 @@ export function hitungAntrianTindakan(
       id: 'kosong-perlu-isi',
       ikon: 'local_gas_station',
       teks: `${kosongPerluIsi} tabung kosong menunggu dikirim isi ulang`,
+      tujuan: '/refill',
+      nada: 'peringatan',
+    });
+  }
+
+  // Sebelum halaman Pabrik bisa menerima tabung titipan, pesanan ini terjebak tanpa
+  // jalan untuk selesai -- inilah item yang membuat bug itu tidak bisa terulang
+  // diam-diam: begitu ada titipan yang menunggu dikirim, Beranda menyebutkannya.
+  const titipanBelumDikirim = titipanSiapKirim(gasOrders).length;
+  if (titipanBelumDikirim > 0) {
+    antrian.push({
+      id: 'titipan-belum-dikirim',
+      ikon: 'local_shipping',
+      teks: `${titipanBelumDikirim} tabung titipan menunggu dikirim ke pabrik`,
       tujuan: '/refill',
       nada: 'peringatan',
     });

@@ -49,6 +49,104 @@ export function hargaVendorTabung(tabung: TabungDihargai, harga: RefillPrice[]):
 }
 
 /**
+ * SKU yang menentukan harga isi tabung titipan pelanggan.
+ *
+ * Tabung milik pelanggan tidak punya kode seri di daftar harga vendor mana pun -- ia
+ * bukan tabung toko dan tidak pernah terdaftar. Harganya disamakan dengan tabung toko
+ * ber-SKU 'YK' untuk gas dan ukuran yang sama; di Kediri Mulur dan Merak itu Rp 40.000
+ * untuk Oxygen 6m3.
+ */
+export const SKU_TITIPAN = 'YK';
+
+/** Sekadar yang dibutuhkan untuk menghargai satu pesanan titip isi. */
+export interface TitipanDihargai {
+  id: string;
+  gasType?: GasType | null;
+  size?: CylinderSize | null;
+}
+
+/** Titipan yang pulang -- vendornya dibaca dari pesanannya sendiri, bukan REFILL_OUT. */
+export interface TitipanPulang extends TitipanDihargai {
+  refillStationId?: string | null;
+}
+
+/**
+ * Kunci pesanan titipan di dalam hargaPerTabung.
+ *
+ * Peta itu dikunci id tabung. Id pesanan datang dari generator yang berbeda ('p-...'
+ * vs 'c-...') dan hari ini tidak mungkin bertabrakan -- tapi kalau suatu saat
+ * bertabrakan, yang terjadi bukan error melainkan satu tabung dihargai dengan harga
+ * tabung titipan orang lain, diam-diam.
+ */
+export const kunciTitipan = (idPesanan: string) => `titipan:${idPesanan}`;
+
+/**
+ * Harga isi satu tabung titipan di sebuah vendor, atau null kalau tidak ada.
+ *
+ * Memakai ulang hargaVendorTabung dengan kode seri palsu 'YK' -- aturan pencocokan
+ * harga cuma ada satu tempat, dan tetap satu tempat.
+ *
+ * Yang ditambahkan di sini satu saja: hasilnya DITOLAK kalau yang ketemu ternyata
+ * baris harga umum vendor (SKU kosong), yang lolos lewat cabang `!p.serialCode` di
+ * hargaVendorTabung. Harga umum adalah harga untuk tabung yang serinya tidak
+ * dikenali, bukan harga yang diputuskan untuk titipan; memakainya diam-diam akan
+ * melahirkan nominal yang tidak pernah disepakati siapa pun. Tidak ketemu lebih jujur
+ * daripada ketemu yang salah -- yang tidak ketemu masih terhitung di jumlahTanpaHarga
+ * dan tertampung baris penyeimbang, sedangkan angka yang salah tidak meninggalkan
+ * jejak apa pun.
+ */
+export function hargaTitipan(p: TitipanDihargai, hargaVendor: RefillPrice[]): RefillPrice | null {
+  if (!p.gasType || !p.size) return null;
+
+  const cocok = hargaVendorTabung(
+    { serialCode: SKU_TITIPAN, gasType: p.gasType, size: p.size },
+    hargaVendor
+  );
+
+  return cocok && (cocok.serialCode || '').toUpperCase() === SKU_TITIPAN ? cocok : null;
+}
+
+export interface PerkiraanTitipan {
+  total: number;
+  jumlahBerharga: number;
+  jumlahTanpaHarga: number;
+  /** Kunci: id pesanan apa adanya. Yang tanpa harga tidak ada di sini sama sekali. */
+  hargaPerPesanan: Map<string, number>;
+}
+
+/**
+ * Berapa tambahan biaya batch kalau pesanan-pesanan titipan ini ikut naik truk.
+ *
+ * `hargaVendor` sudah disaring ke satu vendor oleh pemanggilnya -- tab Pengiriman
+ * memang selalu tahu vendor tujuannya, berbeda dari tab Terima Kembali.
+ */
+export function perkiraanBiayaTitipan(
+  pesanan: TitipanDihargai[],
+  hargaVendor: RefillPrice[]
+): PerkiraanTitipan {
+  let total = 0;
+  let jumlahBerharga = 0;
+  let jumlahTanpaHarga = 0;
+  const hargaPerPesanan = new Map<string, number>();
+
+  for (const p of pesanan) {
+    const harga = hargaTitipan(p, hargaVendor);
+
+    if (!harga) {
+      jumlahTanpaHarga++;
+      continue;
+    }
+
+    const nilai = Number(harga.price) || 0;
+    hargaPerPesanan.set(p.id, nilai);
+    total += nilai;
+    jumlahBerharga++;
+  }
+
+  return { total, jumlahBerharga, jumlahTanpaHarga, hargaPerPesanan };
+}
+
+/**
  * Vendor yang terakhir dikirimi tabung ini.
  *
  * Dibaca dari baris REFILL_OUT, bukan dari cylinders.lastLocation: kolom itu menyimpan
@@ -98,13 +196,19 @@ export interface PerkiraanTerima {
  *
  * Tabung pengganti dihargai menurut vendor yang dikirimi tabung LAMA-nya: penukaran
  * terjadi di pabrik itu, dan yang ditagih adalah pabrik itu juga.
+ *
+ * `titipan` opsional supaya pemanggil lama tidak perlu diubah. Tabung titipan ikut
+ * dijumlahkan ke batch yang sama karena memang satu nota pabrik: yang membedakannya
+ * cuma dari mana vendornya dibaca -- dari pesanannya sendiri, bukan dari REFILL_OUT
+ * yang tidak pernah ada untuknya.
  */
 export function perkiraanBiayaTerima(
   idDiterima: string[],
   penukaran: PenukaranTabung[],
   cylinders: Cylinder[],
   transactions: Transaction[],
-  refillPrices: RefillPrice[]
+  refillPrices: RefillPrice[],
+  titipan: TitipanPulang[] = []
 ): PerkiraanTerima {
   let total = 0;
   let jumlahBerharga = 0;
@@ -134,6 +238,22 @@ export function perkiraanBiayaTerima(
   for (const p of penukaran) {
     const terdaftar = p.penggantiId ? cylinders.find(c => c.id === p.penggantiId) : undefined;
     hitung(p.lamaId, p.pengganti ?? terdaftar, vendorTerakhir(transactions, p.lamaId));
+  }
+
+  for (const p of titipan) {
+    const harga = p.refillStationId
+      ? hargaTitipan(p, refillPrices.filter(x => x.stationId === p.refillStationId))
+      : null;
+
+    if (!harga) {
+      jumlahTanpaHarga++;
+      continue;
+    }
+
+    const nilai = Number(harga.price) || 0;
+    hargaPerTabung.set(kunciTitipan(p.id), nilai);
+    total += nilai;
+    jumlahBerharga++;
   }
 
   return { total, jumlahBerharga, jumlahTanpaHarga, hargaPerTabung };

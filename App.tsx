@@ -17,10 +17,10 @@ import MasterDataView from './components/MasterDataView';
 import GasExchangeView, { GasExchangePayload } from './components/GasExchangeView';
 import AntrianIsiView, { BayarPesananPayload, BuatPesananPayload, SerahPesananPayload } from './components/AntrianIsiView';
 import { NewRentalPayload } from './components/NewRentalForm';
-import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, PenukaranTabung, AppUser, UserRole, MemberStatus, GasPrice, GasOrder, RentalTariff, MetodeBayar } from './types';
+import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, PenukaranTabung, AppUser, UserRole, MemberStatus, GasPrice, GasOrder, RentalTariff, MetodeBayar, StatusPesanan } from './types';
 import { JENIS_PESANAN } from './lib/antrianIsi';
 import { tarifRegulatorAktif } from './lib/regulator';
-import { perkiraanBiayaTerima, rincianBiayaTerima } from './lib/isiUlang';
+import { perkiraanBiayaTerima, rincianBiayaTerima, kunciTitipan, TitipanPulang } from './lib/isiUlang';
 import { bolehKelolaPengguna } from './lib/peran';
 import KasView, { KasPayload } from './components/KasView';
 import { PengeluaranPayload, POS_ISI_ULANG_ID } from './lib/pengeluaran';
@@ -488,10 +488,11 @@ const App: React.FC = () => {
    * yang mengira pilihannya aman lalu menutup halaman kehilangan seluruh pekerjaannya,
    * jadi RefillView harus bisa mengabarkan bahwa penyimpanan gagal.
    */
-  const handleSaveRefillDraft = async (stationId: string, cylinderIds: string[]) => {
+  const handleSaveRefillDraft = async (stationId: string, cylinderIds: string[], orderIds: string[] = []) => {
     const draft: RefillDraft = {
       stationId,
       cylinderIds,
+      orderIds,
       updatedAt: new Date().toISOString(),
       updatedBy: currentUser?.name
     };
@@ -516,7 +517,23 @@ const App: React.FC = () => {
   };
 
   // -- Refill Flow Handlers --
-  const handleSendToRefill = async (stationId: string, cylinderIds: string[]) => {
+
+  /**
+   * Kirim tabung ke pabrik -- tabung toko dan pesanan titip isi pelanggan sekaligus.
+   *
+   * Urutan tulis SENGAJA DIBALIK dari handleBuatPesanan: di sana pesanan ditulis lebih
+   * dulu karena putus di tengah harus menyisakan pesanan yang kelihatan, bukan tabung
+   * yang berpindah tanpa asal-usul. Di sini yang berlaku kebalikannya, karena jalur
+   * ulangnya berbeda:
+   *
+   * - Tabung dulu, lalu pesanan gagal -> tabung toko sudah 'Refilling' sehingga hilang
+   *   sendiri dari daftar kirim; pesanan titipan masih 'MENUNGGU' dan masih tercentang
+   *   di seksinya. Petugas menekan Kirim sekali lagi dan yang berangkat cuma titipan.
+   *   Tidak ada duplikat, tidak ada yang tak terlihat.
+   * - Pesanan dulu, lalu tabung gagal -> pesanan sudah 'DI_PABRIK' padahal fisiknya
+   *   masih di rak, dan tidak ada layar untuk menariknya balik.
+   */
+  const handleSendToRefill = async (stationId: string, cylinderIds: string[], orderIds: string[] = []) => {
     const station = refillStations.find(s => s.id === stationId);
     if (!station) return;
     const date = new Date().toISOString();
@@ -530,15 +547,19 @@ const App: React.FC = () => {
     }));
 
     // Update Cylinders
-    await supabase.from('cylinders').update({
+    const { error: errTabung } = await supabase.from('cylinders').update({
       status: CylinderStatus.Refilling,
       currentHolder: null, // 'RefillStation' logical
       lastLocation: station.name,
       heldSince: null // tidak lagi di tangan pelanggan
     }).in('id', cylinderIds);
+    if (errTabung) throw new Error(`Gagal memperbarui status tabung: ${errTabung.message}`);
 
     // Add Transactions
-    await supabase.from('transactions').insert(newTransactions);
+    if (newTransactions.length > 0) {
+      const { error: errTx } = await supabase.from('transactions').insert(newTransactions);
+      if (errTx) throw new Error(`Gagal mencatat pengiriman: ${errTx.message}`);
+    }
 
     setCylinders(prev => prev.map(c => {
       if (cylinderIds.includes(c.id)) {
@@ -554,6 +575,41 @@ const App: React.FC = () => {
     }));
     setTransactions(prev => [...prev, ...newTransactions]);
 
+    // Pesanan titip isi: sama persis dengan date di atas -- itu kunci yang membuat
+    // titipan bisa digabung ke kartu batch yang sama di riwayat, tanpa perlu id batch.
+    //
+    // .eq('status','MENUNGGU') sebagai penjaga balapan, pola yang sama seperti
+    // handleSerahkanPesanan: dua petugas yang menekan Kirim bersamaan tidak boleh
+    // mengirim satu pesanan dua kali.
+    if (orderIds.length > 0) {
+      const { data: terkirim, error: errPesanan } = await supabase.from('gas_orders')
+        .update({
+          status: 'DI_PABRIK',
+          refillStationId: stationId,
+          tanggalKirimPabrik: date,
+        })
+        .in('id', orderIds)
+        .eq('status', 'MENUNGGU')
+        .select();
+
+      if (errPesanan) {
+        console.error('Gagal menandai pesanan titipan dikirim:', errPesanan);
+        throw new Error(
+          'Tabung toko sudah terkirim, tapi pesanan titipan gagal ditandai. ' +
+          'Pilih ulang tabung titipan lalu tekan Kirim lagi.'
+        );
+      }
+
+      const kena = new Set((terkirim || []).map(o => o.id));
+      setGasOrders(prev => prev.map(o => kena.has(o.id)
+        ? { ...o, status: 'DI_PABRIK' as StatusPesanan, refillStationId: stationId, tanggalKirimPabrik: date }
+        : o));
+
+      if (kena.size < orderIds.length) {
+        throw new Error(`${orderIds.length - kena.size} pesanan titipan sudah berubah status di perangkat lain dan tidak ikut terkirim.`);
+      }
+    }
+
     // Draf vendor ini sudah terwujud jadi pengiriman, jadi tidak ada lagi yang perlu
     // dilanjutkan. Kalau penghapusannya gagal pun pengiriman tetap sah dan tercatat:
     // draf yang tertinggal hanya memuat tabung yang kini berstatus 'Sedang Diisi',
@@ -568,7 +624,8 @@ const App: React.FC = () => {
   };
 
   /**
-   * Terima tabung yang pulang dari pabrik -- termasuk yang pulang sebagai tabung lain.
+   * Terima tabung yang pulang dari pabrik -- termasuk yang pulang sebagai tabung lain,
+   * dan pesanan titip isi pelanggan yang ikut naik truk.
    *
    * `penukaran` memuat tabung yang ditukar pabrik: kode seri lamanya tidak akan pernah
    * kembali, penggantinya kadang belum pernah tercatat sama sekali. Keduanya ikut satu
@@ -577,9 +634,14 @@ const App: React.FC = () => {
   const handleReceiveFromRefill = async (
     cylinderIds: string[],
     totalCost: number,
-    penukaran: PenukaranTabung[] = []
+    penukaran: PenukaranTabung[] = [],
+    orderIds: string[] = []
   ) => {
-    const jumlahDiterima = cylinderIds.length + penukaran.length;
+    // Hanya yang benar-benar masih DI_PABRIK: dua petugas bisa saja mengonfirmasi
+    // penerimaan yang sama dari perangkat berbeda.
+    const pesananPulang = gasOrders.filter(o => orderIds.includes(o.id) && o.status === 'DI_PABRIK');
+
+    const jumlahDiterima = cylinderIds.length + penukaran.length + pesananPulang.length;
     if (jumlahDiterima === 0) return;
 
     const date = new Date().toISOString();
@@ -587,7 +649,12 @@ const App: React.FC = () => {
     // Tiap tabung dicatat sebesar harga vendornya sendiri, dan selisih antara yang
     // dibayar dengan daftar harga berdiri sebagai satu baris tersendiri. Aturannya ada
     // di lib/isiUlang.ts -- termasuk dua keadaan yang sengaja kembali ke bagi rata.
-    const perkiraan = perkiraanBiayaTerima(cylinderIds, penukaran, cylinders, transactions, refillPrices);
+    // Titipan ikut dihitung: vendornya dibaca dari refillStationId pesanannya sendiri,
+    // bukan dari REFILL_OUT yang tidak pernah ada untuknya.
+    const perkiraan = perkiraanBiayaTerima(
+      cylinderIds, penukaran, cylinders, transactions, refillPrices,
+      pesananPulang as TitipanPulang[]
+    );
     const rincian = rincianBiayaTerima(totalCost, jumlahDiterima, perkiraan);
     const biayaTabung = (kunci: string) => rincian.perTabung.get(kunci) ?? rincian.bawaan;
 
@@ -652,6 +719,33 @@ const App: React.FC = () => {
       ?? tabungBaru.find(c => c.id === id)?.serialCode
       ?? id;
 
+    // Satu baris EXPENSE per pesanan titipan, tanpa cylinderId -- tabung titipan tidak
+    // pernah terdaftar di cylinders, jadi transactions.cylinderId tidak bisa menunjuk
+    // apa pun untuknya. category ISI_ULANG_GAS membuatnya berkumpul dengan biaya isi
+    // tabung toko di Laporan Harian, bukan tersasar ke "Lain-lain".
+    //
+    // Nol berarti harga YK-nya tidak ketemu (CO2, 1m3, dll) -- tidak ada baris yang
+    // dibuat, uangnya tertampung baris penyeimbang di bawah, yang juga ber-pos
+    // ISI_ULANG_GAS. Totalnya tetap sama persis dengan nota pabrik; yang hilang cuma
+    // atribusinya ke pesanan tertentu.
+    const idTransaksiTitipan = new Map<string, string>(); // id pesanan -> id baris EXPENSE-nya
+    const barisTitipan: Transaction[] = pesananPulang.flatMap(p => {
+      const nominal = biayaTabung(kunciTitipan(p.id));
+      if (nominal <= 0) return [];
+
+      const idTx = `t-titip-isi-${Date.now()}-${p.id}`;
+      idTransaksiTitipan.set(p.id, idTx);
+
+      return [{
+        id: idTx,
+        type: 'EXPENSE' as const,
+        date,
+        cost: nominal,
+        description: `Isi tabung titipan ${p.serialTitipan || '-'} — ${p.namaPembeli}`,
+        category: POS_ISI_ULANG_ID,
+      }];
+    });
+
     const newTransactions: Transaction[] = [
       ...cylinderIds.map(id => ({
         id: `t-ref-in-${Date.now()}-${id}`,
@@ -660,6 +754,7 @@ const App: React.FC = () => {
         date: date,
         cost: biayaTabung(id)
       })),
+      ...barisTitipan,
       ...penukaran.flatMap(p => {
         const baruId = idPengganti.get(p.lamaId);
         if (!baruId) return [];
@@ -721,7 +816,11 @@ const App: React.FC = () => {
         });
     }
 
-    await supabase.from('transactions').insert(newTransactions);
+    // transaksiIsiId di gas_orders (langkah berikutnya) menunjuk ke baris di sini,
+    // jadi kegagalan insert harus menghentikan alurnya -- bukan diam-diam terus
+    // dengan pengait yang menunjuk transaksi yang sebenarnya tidak pernah tersimpan.
+    const { error: errTx } = await supabase.from('transactions').insert(newTransactions);
+    if (errTx) throw new Error(`Gagal mencatat transaksi penerimaan: ${errTx.message}`);
 
     setCylinders(prev => [
       ...prev.map(c => {
@@ -749,6 +848,45 @@ const App: React.FC = () => {
     ]);
 
     setTransactions(prev => [...prev, ...newTransactions]);
+
+    // Pesanan titipan kembali jadi MENUNGGU -- bukan SELESAI: isinya sudah jadi, tapi
+    // belum diserahkan ke pelanggan. Satu per satu, bukan satu .in(), karena
+    // transaksiIsiId berbeda per baris.
+    //
+    // Kegagalan sebagian DIKUMPULKAN, bukan menghentikan loop: biaya isinya sudah
+    // tercatat di transactions untuk semua pesanan yang berhasil maupun gagal ditandai
+    // di sini, jadi menghentikan di tengah hanya meninggalkan lebih banyak pesanan
+    // dengan biaya tercatat tapi status belum kembali.
+    if (pesananPulang.length > 0) {
+      const gagalDitandai: string[] = [];
+
+      for (const p of pesananPulang) {
+        const kait: Partial<GasOrder> = {
+          status: 'MENUNGGU' as StatusPesanan,
+          tanggalPulangPabrik: date,
+          transaksiIsiId: idTransaksiTitipan.get(p.id) ?? null,
+        };
+
+        const { error } = await supabase.from('gas_orders')
+          .update(kait).eq('id', p.id).eq('status', 'DI_PABRIK');
+
+        if (error) {
+          console.error(`Gagal mengembalikan status pesanan titipan ${p.id}:`, error);
+          gagalDitandai.push(p.serialTitipan || p.namaPembeli || p.id);
+          continue;
+        }
+
+        setGasOrders(prev => prev.map(o => (o.id === p.id ? { ...o, ...kait } : o)));
+      }
+
+      if (gagalDitandai.length > 0) {
+        throw new Error(
+          `Biaya isinya sudah tercatat, tapi ${gagalDitandai.length} pesanan titipan ` +
+          `(${gagalDitandai.join(', ')}) gagal ditandai pulang. Jangan centang lagi tabung ini ` +
+          'saat mencoba ulang -- betulkan statusnya dari halaman Antrian Isi.'
+        );
+      }
+    }
   };
 
   // -- Delivery Handler --
@@ -1117,7 +1255,7 @@ const App: React.FC = () => {
       .select();
     if (errKunci) throw new Error(`Gagal menutup pesanan: ${errKunci.message}`);
     if (!terkunci || terkunci.length === 0) {
-      throw new Error('Pesanan ini sudah diselesaikan atau dibatalkan lebih dulu.');
+      throw new Error('Pesanan ini sudah diselesaikan, dibatalkan, atau tabungnya sedang di pabrik.');
     }
 
     const member = pesanan.memberId ? members.find(m => m.id === pesanan.memberId) : undefined;
@@ -1542,6 +1680,7 @@ const App: React.FC = () => {
               members={members}
               cylinders={cylinders}
               tariffs={tariffs}
+              refillStations={refillStations}
               onBuat={handleBuatPesanan}
               onBayar={handleBayarPesanan}
               onSerahkan={handleSerahkanPesanan}
@@ -1597,6 +1736,7 @@ const App: React.FC = () => {
               stations={refillStations}
               refillPrices={refillPrices}
               transactions={transactions}
+              gasOrders={gasOrders}
               onUpdateRefillPrices={handleUpdateRefillPrices}
               drafts={refillDrafts}
               onSaveDraft={handleSaveRefillDraft}

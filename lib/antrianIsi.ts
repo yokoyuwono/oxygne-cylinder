@@ -21,9 +21,22 @@ export const JENIS_PESANAN: Record<string, string> = {
 
 export const STATUS_PESANAN: Record<string, string> = {
   MENUNGGU: 'Menunggu Isi',
+  DI_PABRIK: 'Di Pabrik',
   SELESAI: 'Sudah Diserahkan',
   BATAL: 'Dibatalkan',
 };
+
+/**
+ * Pesanan yang isinya masih jadi utang toko -- belum diserahkan dan belum batal.
+ *
+ * Satu predikat, bukan perbandingan status yang ditulis ulang di tiap tempat. Status
+ * keempat ('DI_PABRIK') masuk lewat sini, dan yang terlewat memakainya tidak error --
+ * ia cuma MELEWATKAN pesanan. Yang paling mahal kalau terlewat adalah pesananTertunda:
+ * pelanggan bisa keluar dengan bersih padahal tabungnya masih ada di pabrik, dan
+ * setelah keluar tidak ada lagi yang menagih.
+ */
+export const belumDiserahkan = (o: GasOrder): boolean =>
+  o.status === 'MENUNGGU' || o.status === 'DI_PABRIK';
 
 /**
  * Pesanan yang menginap lebih dari seminggu ditandai di layar dan diangkat ke Beranda.
@@ -55,6 +68,8 @@ export interface RingkasanAntrian {
   belumBayar: number;
   /** Pesanan menunggu yang umurnya melewati AMBANG_PESANAN_LAMA. */
   lewatAmbang: number;
+  /** Bagian dari `menunggu` yang tabungnya sedang ada di pabrik. */
+  diPabrik: number;
 }
 
 /**
@@ -157,8 +172,39 @@ export function daftarAntrian(
     jumlahMenunggu: menunggu.length,
     belumBayar: menunggu.filter(b => !b.sudahBayar).length,
     lewatAmbang: menunggu.filter(b => b.umurHari >= AMBANG_PESANAN_LAMA).length,
+    diPabrik: menunggu.filter(b => b.pesanan.status === 'DI_PABRIK').length,
   };
 }
+
+/**
+ * Umur pesanan dalam hari, dihitung dari tanggal masuknya.
+ *
+ * Sengaja dari tanggalMasuk, bukan dari tanggalKirimPabrik: yang diukur adalah umur
+ * JANJI ke pelanggan, dan pesanan yang sudah menginap tiga minggu tidak jadi muda
+ * kembali hanya karena tiga hari terakhir tabungnya ada di pabrik.
+ */
+export const umurPesanan = (o: GasOrder, sekarang: Date = new Date()): number =>
+  umurHari(o.tanggalMasuk, sekarang);
+
+/**
+ * Titipan yang tabungnya masih di toko dan siap ikut ke pabrik.
+ *
+ * Sengaja TIDAK menyaring yang harganya tidak ketemu di daftar vendor. Tabung toko
+ * tanpa harga vendor memang tidak layak dikirim ke sana, tapi tabung titipan fisiknya
+ * tetap harus naik truk apa pun isinya daftar harga -- menyembunyikannya justru
+ * mengulang keadaan yang sedang diperbaiki, yaitu tabung yang tidak bisa berangkat
+ * ke mana-mana.
+ */
+export const titipanSiapKirim = (orders: GasOrder[]): GasOrder[] =>
+  orders.filter(o => o.jenis === 'TITIP_ISI' && o.status === 'MENUNGGU');
+
+/** Titipan yang tabungnya sedang di pabrik; disaring per vendor kalau diminta. */
+export const titipanDiPabrik = (orders: GasOrder[], stationId?: string): GasOrder[] =>
+  orders.filter(o =>
+    o.jenis === 'TITIP_ISI' &&
+    o.status === 'DI_PABRIK' &&
+    (!stationId || o.refillStationId === stationId)
+  );
 
 /**
  * Pesanan seorang pelanggan yang isinya belum diserahkan.
@@ -171,7 +217,7 @@ export function daftarAntrian(
  */
 export function pesananTertunda(orders: GasOrder[], memberId: string): GasOrder[] {
   if (!memberId) return [];
-  return orders.filter(o => o.memberId === memberId && o.status === 'MENUNGGU');
+  return orders.filter(o => o.memberId === memberId && belumDiserahkan(o));
 }
 
 /**
@@ -182,7 +228,7 @@ export function pesananTertunda(orders: GasOrder[], memberId: string): GasOrder[
  */
 export function pesananLama(orders: GasOrder[], sekarang: Date = new Date()): GasOrder[] {
   return orders.filter(
-    o => o.status === 'MENUNGGU' && umurHari(o.tanggalMasuk, sekarang) >= AMBANG_PESANAN_LAMA
+    o => belumDiserahkan(o) && umurHari(o.tanggalMasuk, sekarang) >= AMBANG_PESANAN_LAMA
   );
 }
 
@@ -194,7 +240,7 @@ export function pesananMenunggu(
 ): GasOrder[] {
   return orders.filter(
     o =>
-      o.status === 'MENUNGGU' &&
+      belumDiserahkan(o) &&
       (!gasType || o.gasType === gasType) &&
       (!size || o.size === size)
   );
