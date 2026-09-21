@@ -145,6 +145,14 @@ export interface RefillPrice {
 export interface RefillDraft {
   stationId: string;
   cylinderIds: string[];
+
+  /**
+   * Pesanan titip isi yang ikut dipilih. Disaring ulang persis seperti cylinderIds:
+   * pesanan bisa saja sudah diserahkan atau dibatalkan petugas lain sejak drafnya
+   * disimpan.
+   */
+  orderIds: string[];
+
   updatedAt: string;
   updatedBy?: string;
 }
@@ -182,7 +190,18 @@ export type MetodeBayar = 'CASH' | 'TRANSFER';
  */
 export type JenisPesanan = 'TITIP_ISI' | 'TUKAR_BESAR' | 'TUKAR_KECIL';
 
-export type StatusPesanan = 'MENUNGGU' | 'SELESAI' | 'BATAL';
+/**
+ * 'DI_PABRIK' hanya untuk TITIP_ISI: tabung milik pelanggan sedang ada di vendor.
+ *
+ * Sebelum ada status ini, MENUNGGU menutupi dua keadaan yang berbeda jauh -- tabung
+ * masih tergeletak di rak toko, dan tabung sedang di pabrik orang lain -- sehingga
+ * tombol Serahkan tetap hidup untuk tabung yang fisiknya ada di truk.
+ *
+ * Yang membacanya jangan membandingkan status satu per satu: pakai belumDiserahkan()
+ * di lib/antrianIsi.ts. Yang terlewat memakainya tidak error, ia cuma MELEWATKAN
+ * pesanan -- dan pemeriksaan yang diam jauh lebih mahal daripada yang gagal.
+ */
+export type StatusPesanan = 'MENUNGGU' | 'DI_PABRIK' | 'SELESAI' | 'BATAL';
 
 /**
  * Pesanan yang isinya belum diserahkan -- keadaan "toko berutang isi ke pelanggan",
@@ -235,6 +254,27 @@ export interface GasOrder {
   transaksiBayarId?: string | null;
   transaksiTerimaId?: string | null;
   transaksiSerahId?: string | null;
+
+  /**
+   * Vendor yang sedang memegang tabung titipan ini.
+   *
+   * Tabung toko tidak butuh kolom seperti ini -- vendornya dibaca dari baris
+   * REFILL_OUT lewat vendorTerakhir() di lib/isiUlang.ts. Tabung titipan tidak punya
+   * baris itu sama sekali, karena transactions.cylinderId menunjuk cylinders dan
+   * tabung titipan memang tidak terdaftar di sana. Jadi inilah satu-satunya yang bisa
+   * menjawab "dikirim ke mana" saat harganya dicari kembali pada waktu pulang.
+   */
+  refillStationId?: string | null;
+
+  /** Sama persis dengan date baris REFILL_OUT sekiriman -- itu kunci batch di riwayat. */
+  tanggalKirimPabrik?: string | null;
+  tanggalPulangPabrik?: string | null;
+
+  /**
+   * Baris EXPENSE biaya isi di pabrik. Nominalnya dibaca dari sana, tidak disalin ke
+   * sini -- aturan yang sama dengan `harga` di atas.
+   */
+  transaksiIsiId?: string | null;
 
   catatan?: string | null;
   alasanBatal?: string | null;

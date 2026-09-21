@@ -3,7 +3,7 @@ import { Member, MemberPrice, Transaction, Cylinder, GasOrder, MemberStatus, Ren
 import { labelStatusAnggota, labelStatusTabung, labelJenisTransaksi, formatTanggal } from '../labels';
 import { supabase } from '../lib/supabase';
 import { HARI_MASA_TUNGGU, RingkasanHolding, hitungSemuaHolding, hitungStatusMasaTunggu } from '../lib/memberExit';
-import { JENIS_PESANAN, pesananTertunda } from '../lib/antrianIsi';
+import { JENIS_PESANAN, STATUS_PESANAN, pesananTertunda } from '../lib/antrianIsi';
 import { cariDiKolom } from '../lib/cari';
 
 interface MembersViewProps {
@@ -1041,6 +1041,11 @@ const MembersView: React.FC<MembersViewProps> = ({
 const PesananBelumDiserahkan: React.FC<{ pesanan: GasOrder[] }> = ({ pesanan }) => {
     if (pesanan.length === 0) return null;
 
+    // Pesanan titipan yang sedang di pabrik tidak bisa diselesaikan MAUPUN dibatalkan
+    // dari sini -- tabungnya belum pulang. Tanpa kalimat ini, operator disuruh
+    // "selesaikan atau batalkan" atas sesuatu yang keduanya mustahil saat itu juga.
+    const adaDiPabrik = pesanan.some(p => p.status === 'DI_PABRIK');
+
     return (
         <div className="bg-violet-50 border border-violet-200 rounded-lg p-3 space-y-2">
             <div className="flex items-start gap-2">
@@ -1052,13 +1057,21 @@ const PesananBelumDiserahkan: React.FC<{ pesanan: GasOrder[] }> = ({ pesanan }) 
                     <p className="text-xs text-violet-700">
                         Selesaikan atau batalkan dulu di halaman Antrian Isi — setelah pelanggan
                         keluar, tidak ada lagi yang menagihnya.
+                        {adaDiPabrik && ' Yang berstatus "Di Pabrik" harus diterima kembali dulu di halaman Pabrik sebelum bisa diselesaikan atau dibatalkan.'}
                     </p>
                 </div>
             </div>
             <ul className="space-y-1">
                 {pesanan.map(p => (
                     <li key={p.id} className="text-xs text-gray-700 bg-white border border-violet-100 rounded px-2 py-1 flex justify-between gap-2">
-                        <span className="font-medium">{JENIS_PESANAN[p.jenis] || p.jenis}</span>
+                        <span className="font-medium flex items-center gap-1.5">
+                            {JENIS_PESANAN[p.jenis] || p.jenis}
+                            {p.status === 'DI_PABRIK' && (
+                                <span className="text-[10px] uppercase tracking-wide text-indigo-700 bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded">
+                                    {STATUS_PESANAN[p.status]}
+                                </span>
+                            )}
+                        </span>
                         <span className="text-gray-500">
                             {p.gasType || '-'} {p.size || ''} • masuk {formatTanggal(p.tanggalMasuk)}
                         </span>

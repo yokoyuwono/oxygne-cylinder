@@ -1,5 +1,5 @@
 import { MetodeBayar, Transaction } from '../types';
-import { uangMasukBaris } from './laporanHarian';
+import { barisPendapatan } from './laporanHarian';
 
 /**
  * Metode bayar dan rekapnya.
@@ -81,11 +81,23 @@ export interface BarisMetode extends KelompokMetode {
  * karena angkanya sedang kecil membuat yang dicari justru paling sulit ditemukan.
  * Kelompok penampung adalah sisa, jadi tempatnya memang di belakang.
  *
- * Memakai ulang uangMasukBaris, bukan filter sendiri: kalau keduanya berbeda,
- * rincian dan kartu Uang Masuk akan berselisih dan tidak ada yang tahu mana yang
- * benar. Deposit ikut terhitung di sini justru karena itu -- uangnya masuk lewat
- * laci atau rekening yang sama, dan rincian yang melewatkannya tidak akan pernah
- * berjumlah sama dengan kartunya.
+ * YANG DIPECAH ADALAH PEMASUKAN, BUKAN UANG MASUK. Nilainya diambil dari
+ * barisPendapatan dan cost, sama seperti kartu Pemasukan -- angka yang memberi makan
+ * Laba Bersih. Dulu di sini dipakai uangMasukBaris, yang ikut menambahkan titipan
+ * deposit; akibatnya baris "Tunai" memuat uang pelanggan yang harus dikembalikan
+ * (bukan pemasukan, dan tidak selalu uang tunai), dan jumlah seluruh rincian
+ * berselisih dengan laba tepat sebesar deposit hari itu -- persis pada hari ada sewa
+ * baru, sehingga selisihnya muncul kadang-kadang dan terlihat seperti salah hitung.
+ *
+ * Karena itu titipan sengaja TIDAK ikut di sini; tempatnya di kartu arus kas pada
+ * laporan yang sama, yang menyebutnya sendiri sebagai deposit. Aturan uangnya tetap
+ * satu tempat di lib/laporanHarian.ts.
+ *
+ * Baris yang belum dibayar (bon) tetap ikut, sebagai kelompoknya sendiri: Laporan
+ * Harian mengakui sewa kredit dan pesanan berbunyi bon sebagai pemasukan pada hari
+ * itu, jadi mengeluarkannya justru akan membuat rincian tidak pernah cocok lagi
+ * dengan kartu Pemasukan. Yang penting uangnya TIDAK duduk di baris "Tunai" orang
+ * yang membacanya sebagai isi laci.
  */
 export function rekapPemasukanPerMetode(transactions: Transaction[]): BarisMetode[] {
   // Tunai dan transfer selalu muncul, walau nol. Pemisahannya baru bisa dibaca sebagai
@@ -96,7 +108,11 @@ export function rekapPemasukanPerMetode(transactions: Transaction[]): BarisMetod
   );
 
   for (const t of transactions) {
-    const nilai = uangMasukBaris(t);
+    // Pemasukan saja, sebesar cost-nya: uang yang belum berpindah (bon) tetap ikut
+    // karena laporan mengakuinya sebagai pemasukan hari itu, sedangkan titipan
+    // deposit tidak pernah ikut karena ia bukan pendapatan.
+    if (!barisPendapatan(t)) continue;
+    const nilai = Number(t.cost) || 0;
     if (nilai <= 0) continue;
 
     const metode = kelompokMetode(t);

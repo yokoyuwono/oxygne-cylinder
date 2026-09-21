@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import {
   Cylinder, CylinderSize, CylinderStatus, GasOrder, GasType, JenisPesanan,
-  Member, MetodeBayar, RentalTariff,
+  Member, MetodeBayar, RefillStation, RentalTariff,
 } from '../types';
 import {
-  AMBANG_PESANAN_LAMA, BarisAntrian, JENIS_PESANAN, daftarAntrian,
+  AMBANG_PESANAN_LAMA, BarisAntrian, JENIS_PESANAN, STATUS_PESANAN, daftarAntrian,
 } from '../lib/antrianIsi';
 import { formatIDR, formatTanggal } from '../labels';
 import { usePaginasi } from '../lib/usePaginasi';
@@ -46,6 +46,7 @@ interface AntrianIsiViewProps {
   members: Member[];
   cylinders: Cylinder[];
   tariffs: RentalTariff[];
+  refillStations: RefillStation[];
   onBuat: (p: BuatPesananPayload) => Promise<void>;
   onBayar: (p: BayarPesananPayload) => Promise<void>;
   onSerahkan: (p: SerahPesananPayload) => Promise<void>;
@@ -77,7 +78,7 @@ const JENIS_PILIHAN: { id: JenisPesanan; ikon: string; keterangan: string }[] = 
  * keduanya dijadikan satu tombol, salah satu tanggalnya pasti dikarang.
  */
 const AntrianIsiView: React.FC<AntrianIsiViewProps> = ({
-  orders, members, cylinders, tariffs, onBuat, onBayar, onSerahkan, onBatalkan,
+  orders, members, cylinders, tariffs, refillStations, onBuat, onBayar, onSerahkan, onBatalkan,
 }) => {
   const [tab, setTab] = useState<Tab>('menunggu');
   const [busy, setBusy] = useState(false);
@@ -310,6 +311,12 @@ const AntrianIsiView: React.FC<AntrianIsiViewProps> = ({
                         Belum Dibayar
                       </span>
                     )}
+                    {b.pesanan.status === 'DI_PABRIK' && (
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 flex items-center gap-1">
+                        <span className="material-icons text-[13px]">local_shipping</span>
+                        {STATUS_PESANAN.DI_PABRIK}
+                      </span>
+                    )}
                     <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
                       b.umurHari >= AMBANG_PESANAN_LAMA
                         ? 'bg-red-50 text-red-700'
@@ -320,6 +327,12 @@ const AntrianIsiView: React.FC<AntrianIsiViewProps> = ({
                   </div>
                   <p className="font-bold text-gray-800 mt-2">{b.nama}</p>
                   <p className="text-sm text-gray-500">{b.ringkasBarang}</p>
+                  {b.pesanan.status === 'DI_PABRIK' && (
+                    <p className="text-xs text-indigo-600 mt-1">
+                      Di {refillStations.find(s => s.id === b.pesanan.refillStationId)?.name || 'vendor'}
+                      {b.pesanan.tanggalKirimPabrik && ` sejak ${formatTanggal(b.pesanan.tanggalKirimPabrik)}`}
+                    </p>
+                  )}
                   {b.pesanan.catatan && (
                     <p className="text-xs text-gray-400 mt-1 italic">{b.pesanan.catatan}</p>
                   )}
@@ -335,7 +348,9 @@ const AntrianIsiView: React.FC<AntrianIsiViewProps> = ({
               <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-gray-100">
                 <button
                   onClick={() => setDialogSerah(b)}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold flex items-center gap-1.5"
+                  disabled={b.pesanan.status === 'DI_PABRIK'}
+                  title={b.pesanan.status === 'DI_PABRIK' ? 'Tabung sedang di pabrik -- terima dulu kembali di halaman Pabrik' : undefined}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold flex items-center gap-1.5"
                 >
                   <span className="material-icons text-base">outbox</span>
                   Serahkan Isi
@@ -351,7 +366,9 @@ const AntrianIsiView: React.FC<AntrianIsiViewProps> = ({
                 )}
                 <button
                   onClick={() => setDialogBatal(b)}
-                  className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg text-sm font-bold"
+                  disabled={b.pesanan.status === 'DI_PABRIK'}
+                  title={b.pesanan.status === 'DI_PABRIK' ? 'Tabung sedang di pabrik -- terima dulu kembali di halaman Pabrik' : undefined}
+                  className="px-4 py-2 text-red-600 hover:bg-red-50 disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed rounded-lg text-sm font-bold"
                 >
                   Batalkan
                 </button>

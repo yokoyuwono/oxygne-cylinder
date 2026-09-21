@@ -428,6 +428,7 @@ const AntrianIsiBlok: React.FC<{ antrian: RingkasanAntrian; onBuka: () => void }
           menunggu isi
           {antrian.belumBayar > 0 && ` · ${antrian.belumBayar} belum dibayar`}
           {antrian.lewatAmbang > 0 && ` · ${antrian.lewatAmbang} lewat ${AMBANG_PESANAN_LAMA} hari`}
+          {antrian.diPabrik > 0 && ` · ${antrian.diPabrik} di pabrik`}
         </p>
 
         <ul className="space-y-2">
