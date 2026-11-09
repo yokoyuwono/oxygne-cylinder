@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Cylinder, CylinderStatus, Member, MemberPrice, MetodeBayar, Transaction, GasPrice, RentalTariff } from '../types';
+import { Cylinder, CylinderStatus, Member, MemberPrice, MetodeBayar, Transaction, GasPrice, RentalTariff, RefillPrice } from '../types';
 import { supabase } from '../lib/supabase';
 import NewRentalForm, { NewRentalPayload } from './NewRentalForm';
 import PilihMetodeBayar from './PilihMetodeBayar';
@@ -8,6 +8,8 @@ import { hitungHoldingCurah, hitungHoldingRegulator, totalRegulatorBeredar } fro
 import { tarifRegulatorAktif } from '../lib/regulator';
 import { cariDiKolom } from '../lib/cari';
 import { hariIni } from '../lib/laporanHarian';
+import LaporanPengirimanForm from './LaporanPengirimanForm';
+import { LaporanPengirimanPayload } from '../lib/laporanPengiriman';
 
 interface RentalFormProps {
     cylinders: Cylinder[];
@@ -16,16 +18,19 @@ interface RentalFormProps {
     gasPrices: GasPrice[];
     transactions: Transaction[];
     tariffs: RentalTariff[];
+    refillPrices: RefillPrice[];
     // metodeBayar sengaja di ujung: tanda tangan ini sudah panjang, dan menambah di
     // belakang tidak menggeser satu pun argumen yang sudah ada.
     onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean, returnRegulatorQty?: number, returnBulkQty?: Record<string, number>, metodeBayar?: MetodeBayar, regulatorKeluar?: { sewa: number; jual: number }, tanggal?: string) => void;
     onNewRental: (payload: NewRentalPayload) => Promise<void>;
+    onLaporanPengiriman: (payload: LaporanPengirimanPayload) => Promise<void>;
 }
 
-const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gasPrices, transactions, tariffs, onCompleteRental, onNewRental }) => {
+const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gasPrices, transactions, tariffs, refillPrices, onCompleteRental, onNewRental, onLaporanPengiriman }) => {
     // 'existing' = alur lama (sewa/kembali untuk pelanggan terpilih),
-    // 'new' = pendaftaran pelanggan sekaligus sewa pertamanya.
-    const [mode, setMode] = useState<'existing' | 'new'>('existing');
+    // 'new' = pendaftaran pelanggan sekaligus sewa pertamanya,
+    // 'laporan' = laporan pengiriman: banyak tabung ke banyak pelanggan dalam satu tanggal.
+    const [mode, setMode] = useState<'existing' | 'new' | 'laporan'>('existing');
     const [selectedMemberId, setSelectedMemberId] = useState<string>('');
     const [selectedMemberObj, setSelectedMemberObj] = useState<Member | null>(null); // Store selected member object directly
     const [cart, setCart] = useState<Cylinder[]>([]);
@@ -466,9 +471,38 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
                     <span className="material-icons text-lg">person_add</span>
                     Sewa Baru
                 </button>
+                <button
+                    onClick={() => setMode('laporan')}
+                    className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'laporan' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
+                >
+                    <span className="material-icons text-lg">assignment</span>
+                    Laporan Pengiriman
+                </button>
             </div>
         </div>
     );
+
+    // MODE: LAPORAN PENGIRIMAN -- tabung dari gudang atau langsung dari pabrik ke pelanggan.
+    if (mode === 'laporan') {
+        return (
+            <div className="animate-fade-in-up p-1 md:p-4 pb-20 md:pb-4">
+                <div className="text-center mb-2">
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">Laporan Pengiriman</h1>
+                    <p className="text-gray-500 mb-6 text-sm">Catat tabung yang diantar ke pelanggan, termasuk yang langsung dikirim dari pabrik.</p>
+                </div>
+                {tabBar}
+                <LaporanPengirimanForm
+                    cylinders={cylinders}
+                    members={members}
+                    memberPrices={prices}
+                    tariffs={tariffs}
+                    transactions={transactions}
+                    refillPrices={refillPrices}
+                    onSubmit={onLaporanPengiriman}
+                />
+            </div>
+        );
+    }
 
     // MODE: SEWA BARU -- daftarkan pelanggan sekaligus catat sewa pertamanya.
     if (mode === 'new') {
