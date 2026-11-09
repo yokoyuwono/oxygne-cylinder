@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Cylinder, CylinderStatus, Member, MemberPrice, MetodeBayar, Transaction, GasPrice, RentalTariff, RefillPrice } from '../types';
+import { Cylinder, CylinderStatus, Member, MemberPrice, MetodeBayar, Transaction, GasPrice, RentalTariff, RefillPrice, PengirimanMenunggu } from '../types';
 import { supabase } from '../lib/supabase';
 import NewRentalForm, { NewRentalPayload } from './NewRentalForm';
 import PilihMetodeBayar from './PilihMetodeBayar';
@@ -8,8 +8,8 @@ import { hitungHoldingCurah, hitungHoldingRegulator, totalRegulatorBeredar } fro
 import { tarifRegulatorAktif } from '../lib/regulator';
 import { cariDiKolom } from '../lib/cari';
 import { hariIni } from '../lib/laporanHarian';
-import LaporanPengirimanForm from './LaporanPengirimanForm';
-import { LaporanPengirimanPayload } from '../lib/laporanPengiriman';
+import LaporanPengirimanView from './LaporanPengirimanView';
+import { PenyelesaianPengiriman } from '../lib/laporanPengiriman';
 
 interface RentalFormProps {
     cylinders: Cylinder[];
@@ -23,10 +23,15 @@ interface RentalFormProps {
     // belakang tidak menggeser satu pun argumen yang sudah ada.
     onCompleteRental: (memberId: string, rentIds: string[], returnIds: string[], totalCost: number, isUnpaid?: boolean, returnRegulatorQty?: number, returnBulkQty?: Record<string, number>, metodeBayar?: MetodeBayar, regulatorKeluar?: { sewa: number; jual: number }, tanggal?: string) => void;
     onNewRental: (payload: NewRentalPayload) => Promise<void>;
-    onLaporanPengiriman: (payload: LaporanPengirimanPayload) => Promise<void>;
+    // Laporan Pengiriman: catat siang (daftar tunggu), isi nomor tabung malam (transaksi).
+    pengirimanMenunggu: PengirimanMenunggu[];
+    namaPengguna?: string;
+    onCatatPengiriman: (baris: PengirimanMenunggu[]) => Promise<void>;
+    onHapusPengirimanMenunggu: (id: string) => Promise<void>;
+    onSelesaikanPengiriman: (penyelesaian: PenyelesaianPengiriman[]) => Promise<void>;
 }
 
-const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gasPrices, transactions, tariffs, refillPrices, onCompleteRental, onNewRental, onLaporanPengiriman }) => {
+const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gasPrices, transactions, tariffs, refillPrices, onCompleteRental, onNewRental, pengirimanMenunggu, namaPengguna, onCatatPengiriman, onHapusPengirimanMenunggu, onSelesaikanPengiriman }) => {
     // 'existing' = alur lama (sewa/kembali untuk pelanggan terpilih),
     // 'new' = pendaftaran pelanggan sekaligus sewa pertamanya,
     // 'laporan' = laporan pengiriman: banyak tabung ke banyak pelanggan dalam satu tanggal.
@@ -448,35 +453,41 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
     );
 
     const tabBar = (
-        <div className="flex justify-center mb-6">
-            <div className="bg-gray-100 p-1.5 rounded-xl flex gap-1 flex-wrap justify-center">
+        <div className="flex justify-center mb-4 md:mb-6">
+            {/* Dua kolom di HP supaya empat tombol tidak membungkus tak rata; satu baris dari md. */}
+            <div className="bg-gray-100 p-1.5 rounded-xl grid grid-cols-2 w-full md:w-auto md:flex gap-1 md:flex-wrap md:justify-center">
                 <button
                     onClick={() => { setMode('existing'); setTransactionSource('TOKO'); }}
-                    className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'existing' && transactionSource === 'TOKO' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
+                    className={`px-2 md:px-6 min-h-11 md:min-h-0 py-2.5 rounded-lg text-[13px] md:text-sm font-bold leading-tight transition-all flex items-center justify-center gap-1.5 md:gap-2${mode === 'existing' && transactionSource === 'TOKO' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
                 >
                     <span className="material-icons text-lg">store</span>
                     Toko
                 </button>
                 <button
                     onClick={() => { setMode('existing'); setTransactionSource('DELIVERY'); }}
-                    className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'existing' && transactionSource === 'DELIVERY' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
+                    className={`px-2 md:px-6 min-h-11 md:min-h-0 py-2.5 rounded-lg text-[13px] md:text-sm font-bold leading-tight transition-all flex items-center justify-center gap-1.5 md:gap-2${mode === 'existing' && transactionSource === 'DELIVERY' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
                 >
                     <span className="material-icons text-lg">local_shipping</span>
                     Pengiriman
                 </button>
                 <button
                     onClick={() => setMode('new')}
-                    className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'new' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
+                    className={`px-2 md:px-6 min-h-11 md:min-h-0 py-2.5 rounded-lg text-[13px] md:text-sm font-bold leading-tight transition-all flex items-center justify-center gap-1.5 md:gap-2${mode === 'new' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
                 >
                     <span className="material-icons text-lg">person_add</span>
                     Sewa Baru
                 </button>
                 <button
                     onClick={() => setMode('laporan')}
-                    className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'laporan' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
+                    className={`px-2 md:px-6 min-h-11 md:min-h-0 py-2.5 rounded-lg text-[13px] md:text-sm font-bold leading-tight transition-all flex items-center justify-center gap-1.5 md:gap-2${mode === 'laporan' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}`}
                 >
                     <span className="material-icons text-lg">assignment</span>
                     Laporan Pengiriman
+                    {pengirimanMenunggu.length > 0 && (
+                        <span className="min-w-5 h-5 px-1.5 rounded-full bg-amber-500 text-white text-[11px] flex items-center justify-center">
+                            {pengirimanMenunggu.length}
+                        </span>
+                    )}
                 </button>
             </div>
         </div>
@@ -487,18 +498,22 @@ const RentalForm: React.FC<RentalFormProps> = ({ cylinders, members, prices, gas
         return (
             <div className="animate-fade-in-up p-1 md:p-4 pb-20 md:pb-4">
                 <div className="text-center mb-2">
-                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">Laporan Pengiriman</h1>
-                    <p className="text-gray-500 mb-6 text-sm">Catat tabung yang diantar ke pelanggan, termasuk yang langsung dikirim dari pabrik.</p>
+                    <h1 className="hidden md:block text-3xl font-bold text-gray-900 mb-2">Laporan Pengiriman</h1>
+                    <p className="hidden md:block text-gray-500 mb-6 text-sm">Catat pengiriman siang hari, lalu isi nomor tabungnya malam hari. Tabung yang langsung dikirim dari pabrik ikut tercatat.</p>
                 </div>
                 {tabBar}
-                <LaporanPengirimanForm
+                <LaporanPengirimanView
                     cylinders={cylinders}
                     members={members}
                     memberPrices={prices}
                     tariffs={tariffs}
                     transactions={transactions}
                     refillPrices={refillPrices}
-                    onSubmit={onLaporanPengiriman}
+                    pengirimanMenunggu={pengirimanMenunggu}
+                    namaPengguna={namaPengguna}
+                    onCatat={onCatatPengiriman}
+                    onHapus={onHapusPengirimanMenunggu}
+                    onSelesaikan={onSelesaikanPengiriman}
                 />
             </div>
         );

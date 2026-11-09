@@ -17,8 +17,8 @@ import MasterDataView from './components/MasterDataView';
 import GasExchangeView, { GasExchangePayload } from './components/GasExchangeView';
 import AntrianIsiView, { BayarPesananPayload, BuatPesananPayload, SerahPesananPayload } from './components/AntrianIsiView';
 import { NewRentalPayload } from './components/NewRentalForm';
-import { LaporanPengirimanPayload, STATUS_BISA_DIKIRIM, susunPengiriman } from './lib/laporanPengiriman';
-import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, PenukaranTabung, AppUser, UserRole, MemberStatus, GasPrice, GasOrder, RentalTariff, MetodeBayar, StatusPesanan } from './types';
+import { PenyelesaianPengiriman, STATUS_BISA_DIKIRIM, susunPengiriman, ubahKeBaris } from './lib/laporanPengiriman';
+import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, PenukaranTabung, AppUser, UserRole, MemberStatus, GasPrice, GasOrder, RentalTariff, MetodeBayar, StatusPesanan, PengirimanMenunggu } from './types';
 import { JENIS_PESANAN } from './lib/antrianIsi';
 import { tarifRegulatorAktif } from './lib/regulator';
 import { perkiraanBiayaTerima, rincianBiayaTerima, kunciTitipan, TitipanPulang } from './lib/isiUlang';
@@ -99,6 +99,7 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<AppUser[]>([]); // For Admin View
   const [tariffs, setTariffs] = useState<RentalTariff[]>([]);
   const [gasOrders, setGasOrders] = useState<GasOrder[]>([]);
+  const [pengirimanMenunggu, setPengirimanMenunggu] = useState<PengirimanMenunggu[]>([]);
 
   // -- 1. FETCH INITIAL DATA --
   const fetchData = async () => {
@@ -115,7 +116,8 @@ const App: React.FC = () => {
         prData,
         rtData,
         rdData,
-        goData
+        goData,
+        pmData
       ] = await Promise.all([
         fetchAllRecords<Cylinder>('cylinders'),
         fetchAllRecords<Member>('members'),
@@ -131,7 +133,12 @@ const App: React.FC = () => {
         fetchAllRecords<RentalTariff>('rental_tariffs'),
         // Tanpa kolom `id` -- barisnya berkunci "stationId", satu draf per vendor.
         fetchAllRecords<RefillDraft>('refill_drafts', '*', undefined, 'stationId'),
-        fetchAllRecords<GasOrder>('gas_orders')
+        fetchAllRecords<GasOrder>('gas_orders'),
+        // Hanya yang masih menunggu nomor tabung. Dibungkus catch: pemuatan awal ini satu
+        // Promise.all, jadi tabel yang belum ada (migrasi belum diterapkan) tidak boleh
+        // menjatuhkan seluruh data aplikasi.
+        fetchAllRecords<PengirimanMenunggu>('pengiriman_menunggu', '*', q => q.eq('status', 'MENUNGGU'))
+          .catch(() => [] as PengirimanMenunggu[])
       ]);
 
       if (cylData) setCylinders(cylData);
@@ -145,6 +152,7 @@ const App: React.FC = () => {
       if (rtData) setTariffs(rtData);
       if (rdData) setRefillDrafts(rdData);
       if (goData) setGasOrders(goData);
+      if (pmData) setPengirimanMenunggu(pmData);
 
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -1081,99 +1089,165 @@ const App: React.FC = () => {
   };
 
   /**
-   * Laporan Pengiriman: banyak tabung ke banyak pelanggan dalam satu tanggal.
+   * Laporan Pengiriman, tahap siang: catat pelanggan, jumlah, dan harga.
+   *
+   * Hanya menyimpan daftar tunggu. Tidak ada transaksi dan status tabung tidak berubah --
+   * nomor tabungnya belum diketahui. Keduanya baru ditulis malam hari oleh
+   * handleSelesaikanPengiriman.
+   */
+  const handleCatatPengiriman = async (baris: PengirimanMenunggu[]) => {
+    if (baris.length === 0) return;
+
+    const { error } = await supabase.from('pengiriman_menunggu').insert(baris);
+    if (error) throw new Error(`Gagal menyimpan catatan pengiriman: ${error.message}`);
+
+    setPengirimanMenunggu(prev => [...prev, ...baris]);
+  };
+
+  /** Hapus catatan menunggu yang salah catat. Yang sudah selesai tidak bisa dihapus dari sini. */
+  const handleHapusPengirimanMenunggu = async (id: string) => {
+    const { error } = await supabase.from('pengiriman_menunggu').delete().eq('id', id).eq('status', 'MENUNGGU');
+    if (error) throw new Error(`Gagal menghapus catatan pengiriman: ${error.message}`);
+
+    setPengirimanMenunggu(prev => prev.filter(p => p.id !== id));
+  };
+
+  /**
+   * Laporan Pengiriman, tahap malam: nomor tabung lengkap, tulis transaksi dan status.
    *
    * Tabungnya boleh masih di pabrik (Refilling). Yang itu dicatat REFILL_IN dulu lalu
    * RENTAL_OUT, dan statusnya melompat langsung ke Rented -- lihat lib/laporanPengiriman.ts.
+   * Transaksi bertanggal laporan siang, bukan tanggal malam ini.
    *
-   * Tidak ada RPC untuk ini, jadi urutannya dijaga sendiri: status di server diperiksa
-   * ulang (petugas lain bisa saja sudah menyewakan atau menerima tabung yang sama), update
-   * tabung dijaga status asalnya, dan kalau baris transaksi gagal masuk, tabungnya
-   * dikembalikan. Status tabung tidak boleh berubah tanpa jejak transaksi.
+   * Tidak ada RPC untuk ini, jadi urutannya dijaga sendiri:
+   *  1. Klaim: catatan menunggu ditandai SELESAI lebih dulu, dan hanya yang masih MENUNGGU
+   *     yang terklaim. Dua perangkat yang menyelesaikan catatan yang sama tidak bisa
+   *     keduanya lolos.
+   *  2. Status tabung di server diperiksa ulang (petugas lain bisa saja sudah menyewakan
+   *     atau menerima tabung yang sama), dan update tabung dijaga status asalnya.
+   *  3. Kalau baris transaksi gagal masuk, tabung dikembalikan dan klaim dilepas, jadi
+   *     catatannya bisa diselesaikan lagi tanpa ganda. Status tabung tidak boleh berubah
+   *     tanpa jejak transaksi.
    */
-  const handleLaporanPengiriman = async (payload: LaporanPengirimanPayload) => {
-    const { tanggal, baris, caraBayar } = payload;
-    if (baris.length === 0) return;
+  const handleSelesaikanPengiriman = async (penyelesaian: PenyelesaianPengiriman[]) => {
+    if (penyelesaian.length === 0) return;
 
-    // -- 1. Keadaan terkini di server --
+    const baris = ubahKeBaris(penyelesaian);
     const idTabung = baris.map(b => b.tabung.id);
-    const { data: terkini, error: errCek } = await supabase
-      .from('cylinders')
-      .select('id, serialCode, status, currentHolder, lastLocation, heldSince')
-      .in('id', idTabung);
-    if (errCek) throw new Error(`Gagal memeriksa status tabung: ${errCek.message}`);
+    if (new Set(idTabung).size !== idTabung.length) {
+      throw new Error('Ada tabung yang dipakai lebih dari satu kali. Tidak ada yang disimpan.');
+    }
 
-    const berubah = baris.filter(b => terkini?.find(c => c.id === b.tabung.id)?.status !== b.tabung.status);
-    if (berubah.length > 0) {
+    // -- 1. Klaim catatan menunggu --
+    const idMenunggu = penyelesaian.map(p => p.menunggu.id);
+    const lepasKlaim = (ids: string[]) =>
+      supabase.from('pengiriman_menunggu').update({ status: 'MENUNGGU', selesaiAt: null }).in('id', ids);
+
+    const { data: diklaim, error: errKlaim } = await supabase
+      .from('pengiriman_menunggu')
+      .update({ status: 'SELESAI', selesaiAt: new Date().toISOString() })
+      .in('id', idMenunggu)
+      .eq('status', 'MENUNGGU')
+      .select('id');
+    if (errKlaim) throw new Error(`Gagal memproses catatan pengiriman: ${errKlaim.message}`);
+
+    const idDiklaim = (diklaim ?? []).map(r => r.id);
+    if (idDiklaim.length !== idMenunggu.length) {
+      await lepasKlaim(idDiklaim);
       throw new Error(
-        `Status tabung ${berubah.map(b => b.tabung.serialCode).join(', ')} sudah berubah sejak dipilih. ` +
-        'Muat ulang halaman lalu isi ulang barisnya. Tidak ada yang disimpan.'
+        'Ada catatan yang sudah diselesaikan dari perangkat lain. Muat ulang halaman. Tidak ada yang disimpan.'
       );
     }
 
-    const susunan = susunPengiriman(payload);
+    const susunan = susunPengiriman(baris);
 
-    // Mengembalikan tabung ke keadaan sebelum laporan ini, hanya untuk id yang sempat diubah.
-    const pulihkan = async (ids: string[]) => {
-      for (const id of ids) {
-        const lama = terkini?.find(c => c.id === id);
-        if (!lama) continue;
-        await supabase.from('cylinders').update({
-          status: lama.status,
-          currentHolder: lama.currentHolder,
-          lastLocation: lama.lastLocation,
-          heldSince: lama.heldSince,
-        }).eq('id', id);
-      }
-    };
-
-    // -- 2. Tabung berpindah ke pelanggan --
-    // Dijaga status asalnya: kalau ada yang berubah di antara pemeriksaan dan update ini,
-    // barisnya tidak ikut terupdate dan jumlah yang kembali tidak sama.
-    const sudahDiubah: string[] = [];
-    for (const grup of susunan.perPelanggan) {
-      const { data, error } = await supabase
+    try {
+      // -- 2. Keadaan terkini tabung di server --
+      const { data: terkini, error: errCek } = await supabase
         .from('cylinders')
-        .update({
-          status: CylinderStatus.Rented,
-          currentHolder: grup.member.id,
-          lastLocation: grup.member.companyName || grup.member.name,
-          heldSince: tanggal,
-        })
-        .in('id', grup.tabungIds)
-        .in('status', STATUS_BISA_DIKIRIM)
-        .select('id');
+        .select('id, serialCode, status, currentHolder, lastLocation, heldSince')
+        .in('id', idTabung);
+      if (errCek) throw new Error(`Gagal memeriksa status tabung: ${errCek.message}`);
 
-      sudahDiubah.push(...(data ?? []).map(c => c.id));
-      if (error || (data?.length ?? 0) !== grup.tabungIds.length) {
-        await pulihkan(sudahDiubah);
+      const berubah = baris.filter(b => terkini?.find(c => c.id === b.tabung.id)?.status !== b.tabung.status);
+      if (berubah.length > 0) {
         throw new Error(
-          error
-            ? `Gagal memperbarui status tabung: ${error.message}`
-            : 'Ada tabung yang statusnya berubah saat disimpan. Muat ulang halaman lalu coba lagi. Tidak ada yang disimpan.'
+          `Status tabung ${berubah.map(b => b.tabung.serialCode).join(', ')} sudah berubah sejak dipilih. ` +
+          'Muat ulang halaman lalu isi ulang kodenya. Tidak ada yang disimpan.'
         );
       }
-    }
 
-    // -- 3. Transaksi --
-    const { error: errTx } = await supabase.from('transactions').insert(susunan.transaksi);
-    if (errTx) {
-      await pulihkan(sudahDiubah);
-      throw new Error(`Gagal mencatat transaksi: ${errTx.message}`);
-    }
+      // Mengembalikan tabung ke keadaan sebelum penyelesaian ini, hanya untuk id yang sempat diubah.
+      const pulihkan = async (ids: string[]) => {
+        for (const id of ids) {
+          const lama = terkini?.find(c => c.id === id);
+          if (!lama) continue;
+          await supabase.from('cylinders').update({
+            status: lama.status,
+            currentHolder: lama.currentHolder,
+            lastLocation: lama.lastLocation,
+            heldSince: lama.heldSince,
+          }).eq('id', id);
+        }
+      };
 
-    // -- 4. Bon: harga tiap pelanggan masuk ke utangnya --
-    if (caraBayar === 'BON') {
+      // -- 3. Tabung berpindah ke pelanggan --
+      // Dijaga status asalnya: kalau ada yang berubah di antara pemeriksaan dan update ini,
+      // barisnya tidak ikut terupdate dan jumlah yang kembali tidak sama.
+      const sudahDiubah: string[] = [];
       for (const grup of susunan.perPelanggan) {
-        if (grup.total <= 0) continue;
-        const utangBaru = (members.find(m => m.id === grup.member.id)?.totalDebt || 0) + grup.total;
-        const { error } = await supabase.from('members').update({ totalDebt: utangBaru }).eq('id', grup.member.id);
-        if (error) {
+        const { data, error } = await supabase
+          .from('cylinders')
+          .update({
+            status: CylinderStatus.Rented,
+            currentHolder: grup.member.id,
+            lastLocation: grup.member.companyName || grup.member.name,
+            heldSince: grup.tanggal,
+          })
+          .in('id', grup.tabungIds)
+          .in('status', STATUS_BISA_DIKIRIM)
+          .select('id');
+
+        sudahDiubah.push(...(data ?? []).map(c => c.id));
+        if (error || (data?.length ?? 0) !== grup.tabungIds.length) {
+          await pulihkan(sudahDiubah);
           throw new Error(
-            `Laporan tersimpan, tetapi utang ${grup.member.companyName || grup.member.name} gagal ditambah ` +
-            `(${error.message}). Tambahkan ${grup.total} lewat halaman Bon.`
+            error
+              ? `Gagal memperbarui status tabung: ${error.message}`
+              : 'Ada tabung yang statusnya berubah saat disimpan. Muat ulang halaman lalu coba lagi. Tidak ada yang disimpan.'
           );
         }
+      }
+
+      // -- 4. Transaksi --
+      const { error: errTx } = await supabase.from('transactions').insert(susunan.transaksi);
+      if (errTx) {
+        await pulihkan(sudahDiubah);
+        throw new Error(`Gagal mencatat transaksi: ${errTx.message}`);
+      }
+    } catch (e) {
+      await lepasKlaim(idMenunggu);
+      throw e;
+    }
+
+    // -- 5. Bon: harga baris Bon masuk ke utang pelanggannya --
+    // Di luar try: transaksinya sudah tertulis, jadi klaim tidak boleh dilepas lagi.
+    const bonPerPelanggan = new Map<string, { member: Member; total: number }>();
+    for (const grup of susunan.perPelanggan) {
+      if (grup.totalBon <= 0) continue;
+      const ada = bonPerPelanggan.get(grup.member.id) ?? { member: grup.member, total: 0 };
+      ada.total += grup.totalBon;
+      bonPerPelanggan.set(grup.member.id, ada);
+    }
+
+    for (const { member, total } of bonPerPelanggan.values()) {
+      const utangBaru = (members.find(m => m.id === member.id)?.totalDebt || 0) + total;
+      const { error } = await supabase.from('members').update({ totalDebt: utangBaru }).eq('id', member.id);
+      if (error) {
+        throw new Error(
+          `Pengiriman tersimpan, tetapi utang ${member.companyName || member.name} gagal ditambah ` +
+          `(${error.message}). Tambahkan ${total} lewat halaman Bon.`
+        );
       }
     }
 
@@ -1824,7 +1898,11 @@ const App: React.FC = () => {
               refillPrices={refillPrices}
               onCompleteRental={handleRental}
               onNewRental={handleNewRental}
-              onLaporanPengiriman={handleLaporanPengiriman}
+              pengirimanMenunggu={pengirimanMenunggu}
+              namaPengguna={currentUser?.name}
+              onCatatPengiriman={handleCatatPengiriman}
+              onHapusPengirimanMenunggu={handleHapusPengirimanMenunggu}
+              onSelesaikanPengiriman={handleSelesaikanPengiriman}
             />
           } />
           <Route path="/delivery" element={
