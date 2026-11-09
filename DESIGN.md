@@ -288,6 +288,7 @@ interface RefillDraft {
 - Payment at order (upfront), on delivery, or later (bon)
 - Automatic return scheduling
 - Regulator rental/sale integration
+- Laporan Pengiriman (tab di RentalForm, `lib/laporanPengiriman.ts`): banyak tabung ke banyak pelanggan dalam satu tanggal. Tabung boleh `Available` atau masih di pabrik (`Refilling`). Yang dari pabrik ditulis `REFILL_IN` + `RENTAL_OUT` pada tanggal laporan dan statusnya melompat langsung ke `Rented`. Tanpa RPC: `handleLaporanPengiriman` memeriksa ulang status di server, menjaga update dengan status asal, dan mengembalikan tabung bila insert transaksi gagal.
 
 ### 3. **Refill Management** (RefillView)
 - Draft refill orders per station

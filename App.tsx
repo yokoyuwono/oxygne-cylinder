@@ -17,6 +17,7 @@ import MasterDataView from './components/MasterDataView';
 import GasExchangeView, { GasExchangePayload } from './components/GasExchangeView';
 import AntrianIsiView, { BayarPesananPayload, BuatPesananPayload, SerahPesananPayload } from './components/AntrianIsiView';
 import { NewRentalPayload } from './components/NewRentalForm';
+import { LaporanPengirimanPayload, STATUS_BISA_DIKIRIM, susunPengiriman } from './lib/laporanPengiriman';
 import { Cylinder, Member, Transaction, MemberPrice, CylinderStatus, CylinderSize, RefillStation, RefillPrice, RefillDraft, PenukaranTabung, AppUser, UserRole, MemberStatus, GasPrice, GasOrder, RentalTariff, MetodeBayar, StatusPesanan } from './types';
 import { JENIS_PESANAN } from './lib/antrianIsi';
 import { tarifRegulatorAktif } from './lib/regulator';
@@ -1080,6 +1081,106 @@ const App: React.FC = () => {
   };
 
   /**
+   * Laporan Pengiriman: banyak tabung ke banyak pelanggan dalam satu tanggal.
+   *
+   * Tabungnya boleh masih di pabrik (Refilling). Yang itu dicatat REFILL_IN dulu lalu
+   * RENTAL_OUT, dan statusnya melompat langsung ke Rented -- lihat lib/laporanPengiriman.ts.
+   *
+   * Tidak ada RPC untuk ini, jadi urutannya dijaga sendiri: status di server diperiksa
+   * ulang (petugas lain bisa saja sudah menyewakan atau menerima tabung yang sama), update
+   * tabung dijaga status asalnya, dan kalau baris transaksi gagal masuk, tabungnya
+   * dikembalikan. Status tabung tidak boleh berubah tanpa jejak transaksi.
+   */
+  const handleLaporanPengiriman = async (payload: LaporanPengirimanPayload) => {
+    const { tanggal, baris, caraBayar } = payload;
+    if (baris.length === 0) return;
+
+    // -- 1. Keadaan terkini di server --
+    const idTabung = baris.map(b => b.tabung.id);
+    const { data: terkini, error: errCek } = await supabase
+      .from('cylinders')
+      .select('id, serialCode, status, currentHolder, lastLocation, heldSince')
+      .in('id', idTabung);
+    if (errCek) throw new Error(`Gagal memeriksa status tabung: ${errCek.message}`);
+
+    const berubah = baris.filter(b => terkini?.find(c => c.id === b.tabung.id)?.status !== b.tabung.status);
+    if (berubah.length > 0) {
+      throw new Error(
+        `Status tabung ${berubah.map(b => b.tabung.serialCode).join(', ')} sudah berubah sejak dipilih. ` +
+        'Muat ulang halaman lalu isi ulang barisnya. Tidak ada yang disimpan.'
+      );
+    }
+
+    const susunan = susunPengiriman(payload);
+
+    // Mengembalikan tabung ke keadaan sebelum laporan ini, hanya untuk id yang sempat diubah.
+    const pulihkan = async (ids: string[]) => {
+      for (const id of ids) {
+        const lama = terkini?.find(c => c.id === id);
+        if (!lama) continue;
+        await supabase.from('cylinders').update({
+          status: lama.status,
+          currentHolder: lama.currentHolder,
+          lastLocation: lama.lastLocation,
+          heldSince: lama.heldSince,
+        }).eq('id', id);
+      }
+    };
+
+    // -- 2. Tabung berpindah ke pelanggan --
+    // Dijaga status asalnya: kalau ada yang berubah di antara pemeriksaan dan update ini,
+    // barisnya tidak ikut terupdate dan jumlah yang kembali tidak sama.
+    const sudahDiubah: string[] = [];
+    for (const grup of susunan.perPelanggan) {
+      const { data, error } = await supabase
+        .from('cylinders')
+        .update({
+          status: CylinderStatus.Rented,
+          currentHolder: grup.member.id,
+          lastLocation: grup.member.companyName || grup.member.name,
+          heldSince: tanggal,
+        })
+        .in('id', grup.tabungIds)
+        .in('status', STATUS_BISA_DIKIRIM)
+        .select('id');
+
+      sudahDiubah.push(...(data ?? []).map(c => c.id));
+      if (error || (data?.length ?? 0) !== grup.tabungIds.length) {
+        await pulihkan(sudahDiubah);
+        throw new Error(
+          error
+            ? `Gagal memperbarui status tabung: ${error.message}`
+            : 'Ada tabung yang statusnya berubah saat disimpan. Muat ulang halaman lalu coba lagi. Tidak ada yang disimpan.'
+        );
+      }
+    }
+
+    // -- 3. Transaksi --
+    const { error: errTx } = await supabase.from('transactions').insert(susunan.transaksi);
+    if (errTx) {
+      await pulihkan(sudahDiubah);
+      throw new Error(`Gagal mencatat transaksi: ${errTx.message}`);
+    }
+
+    // -- 4. Bon: harga tiap pelanggan masuk ke utangnya --
+    if (caraBayar === 'BON') {
+      for (const grup of susunan.perPelanggan) {
+        if (grup.total <= 0) continue;
+        const utangBaru = (members.find(m => m.id === grup.member.id)?.totalDebt || 0) + grup.total;
+        const { error } = await supabase.from('members').update({ totalDebt: utangBaru }).eq('id', grup.member.id);
+        if (error) {
+          throw new Error(
+            `Laporan tersimpan, tetapi utang ${grup.member.companyName || grup.member.name} gagal ditambah ` +
+            `(${error.message}). Tambahkan ${grup.total} lewat halaman Bon.`
+          );
+        }
+      }
+    }
+
+    await fetchData();
+  };
+
+  /**
    * Tukar isi tabung tanpa kode.
    *
    * Tidak menyentuh stok sama sekali: botol masuk satu, keluar satu, jadi jumlah
@@ -1720,8 +1821,10 @@ const App: React.FC = () => {
               gasPrices={gasPrices}
               transactions={transactions}
               tariffs={tariffs}
+              refillPrices={refillPrices}
               onCompleteRental={handleRental}
               onNewRental={handleNewRental}
+              onLaporanPengiriman={handleLaporanPengiriman}
             />
           } />
           <Route path="/delivery" element={
