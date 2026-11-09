@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Cylinder, Member, PengirimanMenunggu, RefillPrice, RentalTariff, Transaction } from '../types';
-import { formatIDR, formatTanggal } from '../labels';
+import { formatIDR, formatTanggal, labelStatusTabung } from '../labels';
 import { hariIni } from '../lib/laporanHarian';
 import {
   PenyelesaianPengiriman,
@@ -225,7 +225,7 @@ const IsiKodePengirimanForm: React.FC<IsiKodePengirimanFormProps> = ({
       key: c.id,
       label: c.serialCode,
       detail: `${c.gasType} ${c.size}`,
-      badge: tabungDiPabrik(c) ? 'Di pabrik' : 'Tersedia',
+      badge: tabungDiPabrik(c) ? 'Di pabrik' : labelStatusTabung(c.status),
       badgePeringatan: tabungDiPabrik(c),
     }));
   };

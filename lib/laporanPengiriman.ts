@@ -22,7 +22,16 @@ import { perkiraanBiayaTerima } from './isiUlang';
 /** Bon tidak berpindah uang, jadi bukan metode bayar -- hanya cara mencatat satu baris. */
 export type CaraBayarPengiriman = MetodeBayar | 'BON';
 
-export const STATUS_BISA_DIKIRIM: string[] = [CylinderStatus.Available, CylinderStatus.Refilling];
+/**
+ * Status tabung yang boleh dicatat keluar ke pelanggan di sini: di gudang (Available),
+ * masih di pabrik (Refilling), atau sudah ditandai keluar lewat menu Kirim tetapi belum
+ * tercatat ke pelanggan mana (Delivery). Yang terakhir tidak punya biaya isi -- itu hanya
+ * untuk tabung pabrik.
+ *
+ * Satu konstanta untuk tiga tempat: saran kode, pencocokan kode, dan penjagaan update
+ * tabung di handleSelesaikanPengiriman. Menambah status berarti cukup mengubah di sini.
+ */
+export const STATUS_BISA_DIKIRIM: string[] = [CylinderStatus.Available, CylinderStatus.Refilling, CylinderStatus.Delivery];
 
 export const KETERANGAN_PENGIRIMAN = 'Laporan Pengiriman';
 export const KETERANGAN_ISI_LANGSUNG_KIRIM = 'Langsung dikirim ke pelanggan';
