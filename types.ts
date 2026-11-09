@@ -158,6 +158,32 @@ export interface RefillDraft {
 }
 
 /**
+ * Catatan pengiriman siang hari yang nomor tabungnya belum diketahui.
+ *
+ * Isinya niat, bukan kejadian: selama MENUNGGU belum ada baris transactions dan status
+ * tabung belum berubah. Keduanya baru ditulis ketika nomor tabung diisi malam hari,
+ * bertanggal `tanggal` -- lihat lib/laporanPengiriman.ts. Sengaja terpisah dari
+ * transactions supaya tidak terbaca sebagai botol curah tanpa kode.
+ */
+export interface PengirimanMenunggu {
+  id: string;
+  /** Tanggal laporan, YYYY-MM-DD. */
+  tanggal: string;
+  memberId: string;
+  gasType: GasType;
+  size: CylinderSize;
+  jumlah: number;
+  /** Per tabung, disalin saat dicatat. */
+  harga: number;
+  /** BON bukan metode bayar: uangnya belum berpindah. */
+  caraBayar: MetodeBayar | 'BON';
+  status: 'MENUNGGU' | 'SELESAI';
+  createdAt?: string;
+  createdBy?: string;
+  selesaiAt?: string | null;
+}
+
+/**
  * Satu tabung yang tidak pulang dari pabrik karena ditukar dengan tabung lain.
  *
  * Pabrik kadang mengembalikan tabung yang berbeda dari yang dikirim -- fisiknya
