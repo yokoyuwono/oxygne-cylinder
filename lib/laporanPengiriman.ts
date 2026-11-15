@@ -3,6 +3,7 @@ import {
 } from '../types';
 import { labelStatusTabung } from '../labels';
 import { perkiraanBiayaTerima } from './isiUlang';
+import { tanggalLokal } from './laporanHarian';
 
 /**
  * Laporan Pengiriman: tabung yang diantar ke pelanggan, dicatat dalam dua tahap.
@@ -354,4 +355,141 @@ export function susunPengiriman(baris: BarisPengiriman[], idDasar = Date.now()):
   });
 
   return { transaksi, perPelanggan: [...kelompok.values()] };
+}
+
+// ---------------------------------------------------------------------------
+// Riwayat -- pengiriman yang nomor tabungnya sudah disimpan
+// ---------------------------------------------------------------------------
+
+export interface RiwayatTabung {
+  id: string;
+  kode: string;
+  /** Tabung yang langsung dikirim dari pabrik: ada baris REFILL_IN sebagai pasangannya. */
+  dariPabrik: boolean;
+  biayaIsi: number;
+}
+
+/** Satu pelanggan pada satu tanggal dengan satu cara bayar. */
+export interface RiwayatBaris {
+  kunci: string;
+  memberId: string;
+  namaPelanggan: string;
+  caraBayar: CaraBayarPengiriman;
+  tabung: RiwayatTabung[];
+  /** Jumlah harga seluruh tabung pada baris ini. */
+  total: number;
+}
+
+export interface RiwayatHari {
+  /** YYYY-MM-DD */
+  tanggal: string;
+  baris: RiwayatBaris[];
+  jumlahTabung: number;
+  /** Harga baris yang dibayar tunai atau transfer -- uang yang sudah diterima. */
+  pemasukan: number;
+  /** Harga baris yang dicatat Bon -- belum diterima. */
+  bon: number;
+  biayaIsi: number;
+}
+
+/**
+ * Riwayat pengiriman, terbaru dulu.
+ *
+ * Tidak ada tabel tersendiri: pengiriman yang sudah diberi nomor tabung adalah baris
+ * transactions biasa. RENTAL_OUT berketerangan KETERANGAN_PENGIRIMAN adalah tabung yang
+ * diantar, dan REFILL_IN berketerangan KETERANGAN_ISI_LANGSUNG_KIRIM menandai bahwa
+ * tabung itu datang langsung dari pabrik. Karena itu transaksi yang dibatalkan (voidedAt,
+ * sudah disaring App saat memuat) otomatis hilang dari riwayat, dan pengiriman dari versi
+ * pertama fitur ini -- yang mengisi kode langsung di baris -- ikut tampil.
+ *
+ * Dikelompokkan per tanggal, pelanggan, dan cara bayar. Pelanggan yang sama dengan cara
+ * bayar berbeda di hari yang sama tampil sebagai dua baris, supaya Tunai dan Bon tidak
+ * bercampur.
+ */
+export function susunRiwayat(
+  transactions: Transaction[],
+  cylinders: Cylinder[],
+  members: Member[]
+): RiwayatHari[] {
+  const kodeTabung = new Map(cylinders.map(c => [c.id, c.serialCode]));
+  const namaMember = new Map(members.map(m => [m.id, m.companyName || m.name]));
+
+  const biayaIsi = new Map<string, number>();
+  for (const t of transactions) {
+    if (t.type === 'REFILL_IN' && t.description === KETERANGAN_ISI_LANGSUNG_KIRIM && t.cylinderId) {
+      biayaIsi.set(`${t.cylinderId}|${tanggalLokal(t.date)}`, t.cost || 0);
+    }
+  }
+
+  const baris = new Map<string, RiwayatBaris & { tanggal: string }>();
+
+  for (const t of transactions) {
+    if (t.type !== 'RENTAL_OUT' || t.description !== KETERANGAN_PENGIRIMAN || !t.cylinderId || !t.memberId) continue;
+
+    const tanggal = tanggalLokal(t.date);
+    const cara: CaraBayarPengiriman = t.paymentStatus === 'UNPAID' ? 'BON' : (t.paymentMethod ?? 'CASH');
+    const kunci = `${tanggal}|${t.memberId}|${cara}`;
+
+    const kunciBiaya = `${t.cylinderId}|${tanggal}`;
+    const dariPabrik = biayaIsi.has(kunciBiaya);
+
+    const ada = baris.get(kunci) ?? {
+      kunci,
+      tanggal,
+      memberId: t.memberId,
+      namaPelanggan: namaMember.get(t.memberId) ?? 'Pelanggan tidak ditemukan',
+      caraBayar: cara,
+      tabung: [],
+      total: 0,
+    };
+    ada.tabung.push({
+      id: t.cylinderId,
+      kode: kodeTabung.get(t.cylinderId) ?? t.cylinderId,
+      dariPabrik,
+      biayaIsi: dariPabrik ? (biayaIsi.get(kunciBiaya) ?? 0) : 0,
+    });
+    ada.total += t.cost || 0;
+    baris.set(kunci, ada);
+  }
+
+  const perHari = new Map<string, RiwayatHari>();
+  for (const b of baris.values()) {
+    b.tabung.sort((x, y) => x.kode.localeCompare(y.kode));
+    const hari = perHari.get(b.tanggal) ?? {
+      tanggal: b.tanggal, baris: [], jumlahTabung: 0, pemasukan: 0, bon: 0, biayaIsi: 0,
+    };
+    const { tanggal: _tanggal, ...murni } = b;
+    hari.baris.push(murni);
+    hari.jumlahTabung += b.tabung.length;
+    if (b.caraBayar === 'BON') hari.bon += b.total;
+    else hari.pemasukan += b.total;
+    hari.biayaIsi += b.tabung.reduce((n, x) => n + x.biayaIsi, 0);
+    perHari.set(b.tanggal, hari);
+  }
+
+  const hasil = [...perHari.values()];
+  hasil.forEach(h => h.baris.sort((a, b) => a.namaPelanggan.localeCompare(b.namaPelanggan)));
+  return hasil.sort((a, b) => b.tanggal.localeCompare(a.tanggal));
+}
+
+/** Saring riwayat menurut nama pelanggan atau kode tabung; hari tanpa baris yang cocok dibuang. */
+export function saringRiwayat(hari: RiwayatHari[], kataKunci: string): RiwayatHari[] {
+  const q = kataKunci.trim().toLowerCase();
+  if (!q) return hari;
+
+  return hari.flatMap(h => {
+    const baris = h.baris.filter(b =>
+      b.namaPelanggan.toLowerCase().includes(q) || b.tabung.some(t => t.kode.toLowerCase().includes(q))
+    );
+    if (baris.length === 0) return [];
+
+    return [{
+      ...h,
+      baris,
+      jumlahTabung: baris.reduce((n, b) => n + b.tabung.length, 0),
+      pemasukan: baris.filter(b => b.caraBayar !== 'BON').reduce((n, b) => n + b.total, 0),
+      bon: baris.filter(b => b.caraBayar === 'BON').reduce((n, b) => n + b.total, 0),
+      biayaIsi: baris.reduce((n, b) => n + b.tabung.reduce((m, t) => m + t.biayaIsi, 0), 0),
+    }];
+  });
 }
